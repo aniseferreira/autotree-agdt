@@ -11,29 +11,28 @@ st.set_page_config(
     layout="wide"
 )
 
-# Define diretório local de cache para evitar poluição e rastrear download no servidor
+# Diretório de cache para modelos do Trankit
 CACHE_DIR = os.path.join(os.path.dirname(__file__), ".trankit_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-@st.cache_resource(show_spinner="Carregando modelo linguístico (isso pode levar 1-2 minutos na primeira execução)...")
+@st.cache_resource(show_spinner="Carregando modelo linguístico (isso pode levar de 1 a 2 minutos na primeira execução)...")
 def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
     """
-    Carrega o pipeline do Trankit configurado para economizar RAM no Streamlit Cloud.
+    Carrega o pipeline do Trankit com parâmetros suportados nativamente.
     """
-    # Força a limpeza de memória antes de instanciar novo modelo
+    # Força liberação de RAM antes de instanciar o modelo
     gc.collect()
     
     pipeline = trankit.Pipeline(
         lang=treebank_model,
-        gpu=False,                  # Desativa GPU (Streamlit Cloud roda em CPU)
-        cache_dir=CACHE_DIR,        # Define local de salvar modelos
-        save_disk_space=True        # Remove arquivos compactados temporários após download
+        gpu=False,           # Força execução em CPU no Streamlit Cloud
+        cache_dir=CACHE_DIR  # Armazena os modelos baixados nesta pasta local
     )
     return pipeline
 
 def trankit_to_agdt_dataframe(doc: dict) -> pd.DataFrame:
     """
-    Converte o dicionário retornado pelo Trankit no formato tabular CoNLL-U/AGDT.
+    Converte a estrutura em dicionários do Trankit no formato tabular CoNLL-U/AGDT.
     """
     rows = []
     for sent_idx, sent in enumerate(doc.get("sentences", []), start=1):
@@ -64,11 +63,11 @@ st.sidebar.header("Configurações")
 model_choice = st.sidebar.selectbox(
     "Modelo de Treebank Grego:",
     ["ancient_greek-perseus", "ancient_greek-proiel"],
-    help="O modelo 'perseus' é alinhado com as convenções diretas do AGDT."
+    help="O modelo 'perseus' é alinhado às convenções do AGDT/Perseids."
 )
 
 st.sidebar.markdown("---")
-st.sidebar.caption("💡 **Nota para Cloud:** A primeira execução baixa os pesos do modelo (aprox. 500 MB) e pode demorar um pouco mais.")
+st.sidebar.caption("💡 **Nota Cloud:** O download do modelo (aprox. 500 MB) ocorre apenas no primeiro carregamento.")
 
 # Entrada de Texto
 default_text = "Μῆνιν ἄειδε θεὰ Πηληϊάδεω Ἀχιλῆος"
@@ -82,7 +81,7 @@ input_text = st.text_area(
 if st.button("Analisar Dependências", type="primary"):
     if input_text.strip():
         try:
-            # Carrega o modelo de forma segura com cache
+            # Carrega o pipeline com os argumentos aceitos
             nlp = load_trankit_pipeline(model_choice)
             
             with st.spinner("Processando morfossintaxe e parse de dependências..."):
@@ -105,12 +104,12 @@ if st.button("Analisar Dependências", type="primary"):
             )
 
         except MemoryError:
-            st.error("⚠️ Limite de memória RAM do Streamlit Cloud atingido. Tente analisar um texto menor ou reiniciar a aplicação.")
+            st.error("⚠️ Limite de memória RAM atingido. Tente analisar um texto menor.")
         except Exception as e:
             st.error(f"Ocorreu um erro durante o processamento: {str(e)}")
             
         finally:
-            # Coleta de lixo extra após o processamento para liberar RAM
+            # Garante a liberação de memória após o ciclo
             gc.collect()
     else:
         st.warning("Por favor, insira um texto para analisar.")
