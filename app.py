@@ -1,8 +1,3 @@
-Biblioteca
-/
-app_v2.py
-
-
 import io
 import gc
 import re
