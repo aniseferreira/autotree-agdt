@@ -168,34 +168,47 @@ def mapear_relacao_basica(w):
         return "AuxG"
 
     # --------------------------------------------------------
-    # PARTÍCULAS
+    # PARTÍCULAS — tratamento contextual
+    # --------------------------------------------------------
+    #
+    # AuxY não deve ser atribuído apenas pelo lema.
+    # Se a palavra está funcionando como coordenador UD (cc),
+    # ela será tratada pela regra de coordenação.
+    #
+    # AuxY é usado aqui para partículas discursivas/adverbiais
+    # quando o Stanza as analisa como advmod.
     # --------------------------------------------------------
 
     if text in {"ἂν", "ἄν", "αν"} and rel == "advmod":
         return "AuxY"
 
-    if text == "καί" and rel == "advmod":
-        return "AuxZ"
-
-    if text in {"γὰρ", "γαρ"}:
+    if text in {"γὰρ", "γαρ"} and rel == "advmod":
         w["lemma"] = "γάρ"
         w["xpos"] = "d--------"
         return "AuxY"
 
-    if text in {"μὲν", "μεν"}:
+    if text in {"μὲν", "μεν"} and rel == "advmod":
         w["lemma"] = "μέν"
         w["xpos"] = "d--------"
         return "AuxY"
+
+    # δέ como partícula discursiva; se for cc, permanece
+    # disponível para a regra de coordenação.
+    if text in {"δέ", "δε"} and rel == "advmod":
+        w["lemma"] = "δέ"
+        w["xpos"] = "d--------"
+        return "AuxY"
+
+    if text == "καί" and rel == "advmod":
+        return "AuxZ"
 
     # --------------------------------------------------------
     # NEGADORES
     # --------------------------------------------------------
 
     if text in NEGACOES:
-
         if rel in {"mark", "sconj"}:
             return "AuxC"
-
         return "AuxZ"
 
     # --------------------------------------------------------
@@ -204,13 +217,11 @@ def mapear_relacao_basica(w):
 
     if is_conj_subordinativa(w["text"]):
         return "AuxC"
+
     # --------------------------------------------------------
     # PREPOSIÇÕES
-    #
-    # O Stanza pode classificar uma preposição como ADV.
-    # Para o AGDT, preposições são AuxP.
     # --------------------------------------------------------
-    
+
     if text in PREPOSICOES_GREGAS:
         w["upos"] = "ADP"
         w["xpos"] = "r--------"
@@ -225,8 +236,6 @@ def mapear_relacao_basica(w):
 
     # --------------------------------------------------------
     # COP
-    #
-    # NÃO transformamos εἰμί automaticamente em AuxV.
     # --------------------------------------------------------
 
     if rel == "cop":
@@ -234,11 +243,6 @@ def mapear_relacao_basica(w):
 
     # --------------------------------------------------------
     # AUX
-    #
-    # Só aceitamos AuxV quando o parser explicitamente
-    # produziu uma relação UD auxiliar.
-    #
-    # Isto é deliberadamente conservador.
     # --------------------------------------------------------
 
     if rel == "aux":
@@ -249,103 +253,57 @@ def mapear_relacao_basica(w):
     # --------------------------------------------------------
 
     if rel == "punct":
-
         if w["text"] in PONTUACAO_AUXX:
             return "AuxX"
-
         if w["text"] in PONTUACAO_AUXK:
             return "AuxK"
-
         if w["text"] in PONTUACAO_AUXG:
             return "AuxG"
-
         return "AuxG"
 
     # --------------------------------------------------------
     # ADJETIVO SUBSTANTIVADO
-    #
-    # Um ADJ não deve ser automaticamente ATR.
-    #
-    # Se o adjetivo estiver funcionando como argumento de
-    # um verbo, preservamos a função sintática correspondente.
     # --------------------------------------------------------
-    
+
     if w["upos"] == "ADJ":
-    
         if rel in {
-            "obj",
-            "iobj",
-            "obl",
-            "obl:arg",
-            "nsubj",
-            "nsubj:pass",
-            "csubj"
+            "obj", "iobj", "obl", "obl:arg",
+            "nsubj", "nsubj:pass", "csubj"
         }:
-    
-            if rel in {
-                "nsubj",
-                "nsubj:pass",
-                "csubj"
-            }:
+            if rel in {"nsubj", "nsubj:pass", "csubj"}:
                 return "SBJ"
-    
-            if rel in {
-                "obj",
-                "iobj",
-                "obl:arg"
-            }:
+            if rel in {"obj", "iobj", "obl:arg"}:
                 return "OBJ"
-    
             if rel == "obl":
                 return "ADV"
+
     # --------------------------------------------------------
     # MAPA GERAL
     # --------------------------------------------------------
 
     mapa = {
-
         "nsubj": "SBJ",
         "nsubj:pass": "SBJ",
-
         "obj": "OBJ",
-
         "iobj": "OBJ",
-
         "xcomp": "OBJ",
-
         "ccomp": "OBJ",
-
         "csubj": "SBJ",
-
         "csubj:pass": "SBJ",
-
         "root": "PRED",
-
         "advmod": "ADV",
-
         "advcl": "ADV",
-
         "obl": "ADV",
-
         "obl:arg": "OBJ",
-
         "amod": "ATR",
-
         "det": "ATR",
-
         "nmod": "ATR",
-
         "acl": "ATR",
-
         "acl:relcl": "ATR",
-
         "case": "AuxP",
-
         "mark": "AuxC",
-
         "sconj": "AuxC",
-
-        "cc": "COORD"
+        "cc": "COORD",
     }
 
     return mapa.get(rel, rel)
@@ -571,54 +529,18 @@ def aplicar_auxv(words):
 
 def aplicar_coordenacao(words):
     """
-    Converte coordenações da UD para a estrutura AGDT.
+    Converte somente os membros DIRETOS de cada coordenação UD.
 
-    Regras AGDT:
-    1. 'conj' é uma relação UD e nunca deve aparecer no AGDT.
-    2. O último elemento coordenador é COORD.
-    3. Os elementos coordenados dependem de COORD.
-    4. Todos os elementos coordenados recebem:
-           função sintática + _CO
-    5. Conjunções anteriores ao último coordenador recebem AuxY.
-
-    Exemplo simples:
-
-        UD:
-            περιέχουσι   root
-            λέγονται     conj
-            καί           cc
-
-        AGDT:
-
-                         COORD
-                           καί
-                         /   \
-                PRED_CO       PRED_CO
-              περιέχουσι     λέγονται
-
-
-    Coordenação múltipla:
-
-        A καὶ B καὶ C
-
-        AGDT:
-
-                         COORD
-                           καὶ
-                    /      |      \
-                 A_CO     B_CO     C_CO
-                           ↑
-                         AuxY
-                           καὶ
-
-    A função sintática dos elementos coordenados é herdada
-    do primeiro elemento.
+    Regras:
+    1. Cada grupo é definido pelos elementos com deprel=conj
+       que têm o mesmo head UD.
+    2. O primeiro elemento é o head sintático da coordenação.
+    3. O último cc da coordenação é COORD.
+    4. Somente os membros diretos recebem função + _CO.
+    5. Conjunções anteriores ao COORD final recebem AuxY.
+    6. Dependentes internos dos membros não recebem _CO por
+       pertencerem à mesma oração/coordenada.
     """
-
-    # --------------------------------------------------------
-    # 1. Localizar todos os elementos que a UD marcou como
-    #    "conj".
-    # --------------------------------------------------------
 
     elementos_conj = [
         w for w in words
@@ -628,246 +550,80 @@ def aplicar_coordenacao(words):
     if not elementos_conj:
         return
 
-    # --------------------------------------------------------
-    # 2. Agrupar elementos coordenados pelo primeiro elemento.
-    #
-    #    Em UD:
-    #
-    #       A ← head de B
-    #       A ← head de C
-    #
-    #    para:
-    #
-    #       A e B e C
-    #
-    #    Portanto todos os "conj" que têm o mesmo head
-    #    pertencem à mesma coordenação.
-    # --------------------------------------------------------
-
     grupos = {}
-
     for segundo in elementos_conj:
+        grupos.setdefault(str(segundo["head"]), []).append(segundo)
 
-        head_id = str(
-            segundo["head"]
-        )
+    grupos_ordenados = sorted(
+        grupos.items(),
+        key=lambda item: min([int(x["id"]) for x in item[1]] + [int(item[0])])
+    )
 
-        grupos.setdefault(
-            head_id,
-            []
-        ).append(segundo)
+    for primeiro_id, segundos in grupos_ordenados:
 
-    # --------------------------------------------------------
-    # 3. Processar cada coordenação separadamente.
-    # --------------------------------------------------------
-
-    for primeiro_id, segundos in grupos.items():
-
-        primeiro = get_word(
-            words,
-            primeiro_id
-        )
-
+        primeiro = get_word(words, primeiro_id)
         if primeiro is None:
             continue
 
-        # ----------------------------------------------------
-        # Ordenar os elementos pela posição no texto.
-        # ----------------------------------------------------
-
-        segundos.sort(
+        segundos = sorted(segundos, key=lambda w: int(w["id"]))
+        elementos = sorted(
+            [primeiro] + segundos,
             key=lambda w: int(w["id"])
         )
 
-        elementos = [
-            primeiro
-        ] + segundos
+        funcao_base = primeiro.get("new_rel") or mapear_relacao_basica(primeiro)
 
-        elementos.sort(
-            key=lambda w: int(w["id"])
-        )
-
-        # ----------------------------------------------------
-        # Determinar a função sintática do primeiro elemento.
-        # ----------------------------------------------------
-
-        funcao_base = primeiro.get(
-            "new_rel"
-        )
-
-        if not funcao_base:
-
-            funcao_base = mapear_relacao_basica(
-                primeiro
-            )
-
-        # ----------------------------------------------------
-        # NUNCA permitir que uma relação UD sobreviva.
-        # ----------------------------------------------------
-
-        if funcao_base in {
-            "conj",
-            "cc"
-        }:
+        if funcao_base in {"conj", "cc", "COORD"}:
             funcao_base = "PRED"
 
-        # Se já houver _CO, remover para evitar:
-        #
-        # PRED_CO_CO
-        #
-        if funcao_base.endswith(
-            "_CO"
-        ):
+        if funcao_base.endswith("_CO"):
             funcao_base = funcao_base[:-3]
 
-        # ----------------------------------------------------
-        # 4. Encontrar as conjunções associadas ao grupo.
-        # ----------------------------------------------------
+        ids_elementos = {str(e["id"]) for e in elementos}
+        primeiro_pos = int(primeiro["id"])
+        ultima_pos = int(elementos[-1]["id"])
 
-        primeiro_pos = int(
-            primeiro["id"]
-        )
-
-        ultima_pos = int(
-            elementos[-1]["id"]
-        )
-
-        conjuncoes = []
-
-        for w in words:
-
+        conjuncoes = [
+            w for w in words
             if (
-                w["deprel"].split(":")[0]
-                != "cc"
-            ):
-                continue
-
-            wid = int(w["id"])
-
-            # A conjunção deve estar na região da coordenação.
-            if not (
-                primeiro_pos
-                < wid
-                <= ultima_pos
-            ):
-                continue
-
-            # Aceitamos:
-            #
-            # cc ligado ao primeiro elemento
-            # ou cc ligado a algum elemento coordenado.
-            head = str(
-                w["head"]
+                w["deprel"].split(":")[0] == "cc"
+                and str(w["head"]) in ids_elementos
+                and primeiro_pos < int(w["id"]) <= ultima_pos
             )
-
-            ids_elementos = {
-                str(e["id"])
-                for e in elementos
-            }
-
-            if head in ids_elementos:
-                conjuncoes.append(w)
-
-        # ----------------------------------------------------
-        # 5. Se não houver cc explícito, ainda corrigimos
-        #    "conj" para função_CO.
-        # ----------------------------------------------------
+        ]
+        conjuncoes.sort(key=lambda w: int(w["id"]))
 
         if not conjuncoes:
-
             for elemento in elementos:
-
-                if elemento is primeiro:
-                    continue
-
-                elemento["new_rel"] = (
-                    f"{funcao_base}_CO"
-                )
-
+                elemento["new_rel"] = f"{funcao_base}_CO"
+                if elemento is not primeiro:
+                    elemento["new_head"] = primeiro["new_head"]
             continue
 
-        # ----------------------------------------------------
-        # Ordenar conjunções.
-        # ----------------------------------------------------
-
-        conjuncoes.sort(
-            key=lambda w: int(w["id"])
-        )
-
-        # ----------------------------------------------------
-        # 6. O ÚLTIMO coordenador é o COORD verdadeiro.
-        # ----------------------------------------------------
-
         coord_real = conjuncoes[-1]
+        coord_id = str(coord_real["id"])
 
-        coord_id = str(
-            coord_real["id"]
-        )
-
-        antigo_head = str(
-            primeiro["new_head"]
-        )
-
+        antigo_head = primeiro["new_head"]
         coord_real["new_rel"] = "COORD"
+        coord_real["new_head"] = antigo_head
 
-        coord_real["new_head"] = (
-            antigo_head
-        )
-
-        # ----------------------------------------------------
-        # 7. Todos os elementos coordenados recebem
-        #    função + _CO e dependem do COORD.
-        # ----------------------------------------------------
-
+        # SOMENTE os membros diretos da coordenação recebem _CO.
         for elemento in elementos:
-
-            elemento["new_rel"] = (
-                f"{funcao_base}_CO"
-            )
-
-            elemento["new_head"] = (
-                coord_id
-            )
-
-        # ----------------------------------------------------
-        # 8. Restaurar COORD depois de alterar os elementos.
-        # ----------------------------------------------------
+            elemento["new_rel"] = f"{funcao_base}_CO"
+            elemento["new_head"] = coord_id
 
         coord_real["new_rel"] = "COORD"
-
-        coord_real["new_head"] = (
-            antigo_head
-        )
-
-        # ----------------------------------------------------
-        # 9. Todas as conjunções anteriores ao último
-        #    são AuxY.
-        # ----------------------------------------------------
+        coord_real["new_head"] = antigo_head
 
         for conj_anterior in conjuncoes[:-1]:
-
             conj_anterior["new_rel"] = "AuxY"
-
-            conj_anterior["new_head"] = (
-                coord_id
-            )
-
-        # ----------------------------------------------------
-        # 10. Segurança:
-        # nenhum elemento UD "conj" pode chegar ao AGDT.
-        # ----------------------------------------------------
+            conj_anterior["new_head"] = coord_id
 
         for elemento in elementos:
-
             if elemento["new_rel"] == "conj":
+                elemento["new_rel"] = f"{funcao_base}_CO"
+                elemento["new_head"] = coord_id
 
-                elemento["new_rel"] = (
-                    f"{funcao_base}_CO"
-                )
-
-                elemento["new_head"] = (
-                    coord_id
-                )
 
 # ============================================================
 # COORDENAÇÃO MÚLTIPLA / CASOS COM VÍRGULAS
@@ -945,22 +701,148 @@ def aplicar_artigos_repetidos(words):
 def aplicar_auxiliares_especiais(words):
 
     for w in words:
-
         text = normalizar(w["text"])
 
-        # ἄν como AuxY quando partícula
         if (
             text in {"ἄν", "ἂν", "αν"}
             and w["deprel"] == "advmod"
         ):
             w["new_rel"] = "AuxY"
 
-        # καί adverbial
-        if (
+        elif (
             text == "καί"
             and w["deprel"] == "advmod"
         ):
             w["new_rel"] = "AuxZ"
+
+        elif (
+            text in {"γὰρ", "γαρ", "μὲν", "μεν", "δέ", "δε"}
+            and w["deprel"] == "advmod"
+        ):
+            w["new_rel"] = "AuxY"
+
+
+# ============================================================
+# PARTICÍPIO SUBSTANTIVADO
+# ============================================================
+
+def aplicar_participios_substantivados(words):
+    """
+    Reconhece construções do tipo ὁ + particípio.
+
+    Quando o artigo é o determinante do particípio, o particípio
+    constitui o núcleo de um grupo nominal. Em particular:
+      - nominativo → SBJ quando funciona como argumento do verbo;
+      - acusativo/dativo → OBJ quando funciona como argumento;
+      - demais casos preservam a função já atribuída.
+
+    Dependentes internos do particípio não recebem _CO.
+    """
+
+    for participio in words:
+
+        if participio["upos"] != "VERB":
+            continue
+
+        feats = participio.get("feats") or ""
+        if "VerbForm=Part" not in feats:
+            continue
+
+        artigos = [
+            w for w in words
+            if (
+                w["upos"] == "DET"
+                and w["head"] == participio["id"]
+                and normalizar(w["lemma"]) in {"ὁ", "ο"}
+            )
+        ]
+
+        if not artigos:
+            continue
+
+        caso = None
+        m = re.search(r"Case=([^|]+)", feats)
+        if m:
+            caso = m.group(1)
+
+        if participio["deprel"] in {
+            "nsubj", "nsubj:pass", "csubj", "obj", "iobj", "obl:arg"
+        }:
+            if participio["deprel"] in {"nsubj", "nsubj:pass", "csubj"}:
+                participio["new_rel"] = "SBJ"
+            else:
+                participio["new_rel"] = "OBJ"
+            continue
+
+        if caso == "Nom":
+            participio["new_rel"] = "SBJ"
+        elif caso in {"Acc", "Dat"}:
+            participio["new_rel"] = "OBJ"
+
+        for artigo in artigos:
+            artigo["new_rel"] = "ATR"
+            artigo["new_head"] = participio["id"]
+
+
+# ============================================================
+# INFINITIVO COM FUNÇÃO DE SUJEITO
+# ============================================================
+
+def aplicar_infinitivo_sujeito(words):
+    """
+    Corrige infinitivos que funcionam como sujeito.
+
+    Se o Stanza já os marcou como csubj/csubj:pass, a função AGDT
+    é SBJ. Para um infinitivo que o parser deixou como root,
+    procuramos um predicado nominal/adjetival compatível.
+
+    O head 0 representa a raiz da árvore AGDT; não é criado como
+    token visível no XML.
+    """
+
+    for infinitivo in words:
+
+        if infinitivo["upos"] != "VERB":
+            continue
+
+        feats = infinitivo.get("feats") or ""
+        if "VerbForm=Inf" not in feats:
+            continue
+
+        if infinitivo["deprel"] in {"csubj", "csubj:pass"}:
+            infinitivo["new_rel"] = "SBJ"
+            continue
+
+        if infinitivo["deprel"] != "root":
+            continue
+
+        candidatos = [
+            w for w in words
+            if (
+                w["id"] != infinitivo["id"]
+                and w["head"] == infinitivo["id"]
+                and w["upos"] in {"ADJ", "NOUN", "PROPN"}
+            )
+        ]
+
+        if not candidatos:
+            continue
+
+        pred = next(
+            (
+                w for w in candidatos
+                if w["deprel"] in {"xcomp", "obj", "obl", "nmod"}
+            ),
+            None
+        )
+
+        if pred is None:
+            continue
+
+        pred["new_rel"] = "PRED"
+        pred["new_head"] = 0
+        infinitivo["new_rel"] = "SBJ"
+        infinitivo["new_head"] = pred["id"]
 
 
 # ============================================================
@@ -974,28 +856,34 @@ def converter_sentenca(sent):
     # 1. mapa básico
     inicializar_agdt(words)
 
-    # 2. auxiliares especiais
+    # 2. partículas e auxiliares contextuais
     aplicar_auxiliares_especiais(words)
 
-    # 3. AuxV conservador
+    # 3. infinitivos com função de sujeito
+    aplicar_infinitivo_sujeito(words)
+
+    # 4. particípios substantivados
+    aplicar_participios_substantivados(words)
+
+    # 5. AuxV conservador
     aplicar_auxv(words)
 
-    # 4. copula
+    # 6. copula
     aplicar_copula(words)
 
-    # 5. Coordenação
+    # 7. Coordenação — somente membros diretos
     aplicar_coordenacao(words)
 
-    # 6. AuxP
+    # 8. AuxP
     aplicar_auxp(words)
 
-    # 7. AuxC
+    # 9. AuxC
     aplicar_auxc(words)
 
-    # 8. artigos
+    # 10. artigos
     aplicar_artigos_repetidos(words)
 
-    # 9. pontuação final
+    # 11. pontuação
     corrigir_pontuacao_em_coordenacao(words)
 
     # --------------------------------------------------------
@@ -1009,6 +897,12 @@ def converter_sentenca(sent):
 
         if w["new_rel"] is None:
             w["new_rel"] = w["deprel"]
+
+        # REGRA AGDT:
+        # pontuação de fechamento AuxK pertence à ROOT,
+        # nunca ao PRED.
+        if w["new_rel"] == "AuxK":
+            w["new_head"] = 0
 
     return {
         "text": sent.text,
