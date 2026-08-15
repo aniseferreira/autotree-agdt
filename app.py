@@ -2,7 +2,7 @@ import io
 import gc
 import re
 import streamlit as st
-from trankit import Pipeline
+import stanza
 import pandas as pd
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
@@ -18,21 +18,28 @@ st.set_page_config(
     layout="wide"
 )
 
-st.caption("Parser automático: Trankit — UD Ancient Greek Perseus")
-
 
 # ============================================================
-# TRANKIT — ANCIENT GREEK PERSEUS
+# STANZA
 # ============================================================
 
 @st.cache_resource(show_spinner=False)
 def carregar_pipeline():
 
-    return Pipeline(
-        "ancient-greek-perseus",
-        gpu=False,
-        cache_dir="./trankit_cache"
+    stanza.download(
+        "grc",
+        package="perseus",
+        processors="tokenize,lemma,pos,depparse"
     )
+
+    return stanza.Pipeline(
+        lang="grc",
+        package="perseus",
+        processors="tokenize,lemma,pos,depparse",
+        tokenize_no_ssplit=True,
+        verbose=False
+    )
+
 
 # ============================================================
 # CONSTANTES AGDT
@@ -114,40 +121,20 @@ def is_conj_subordinativa(word):
 # ============================================================
 
 def construir_words(sent):
-    """
-    Converte uma sentença Trankit (dict) para a estrutura interna
-    usada pelo conversor UD -> AGDT.
-
-    Trankit retorna:
-        sent["tokens"] = [
-            {
-                "id": ...,
-                "text": ...,
-                "lemma": ...,
-                "upos": ...,
-                "xpos": ...,
-                "feats": ...,
-                "head": ...,
-                "deprel": ...
-            }
-        ]
-    """
 
     words = []
 
-    for token in sent.get("tokens", []):
-
-        deprel = token.get("deprel") or "_"
+    for token in sent.words:
 
         words.append({
-            "id": int(token["id"]),
-            "text": token.get("text") or "_",
-            "lemma": token.get("lemma") or "_",
-            "upos": token.get("upos") or "_",
-            "xpos": token.get("xpos") or "_",
-            "feats": token.get("feats") or "_",
-            "head": int(token.get("head", 0)),
-            "deprel": deprel,
+            "id": int(token.id),
+            "text": token.text or "_",
+            "lemma": token.lemma or "_",
+            "upos": token.upos or "_",
+            "xpos": token.xpos or "_",
+            "feats": token.feats or "_",
+            "head": int(token.head),
+            "deprel": token.deprel or "_",
             "new_rel": None,
             "new_head": None
         })
@@ -1036,7 +1023,7 @@ def converter_sentenca(sent):
             w["new_head"] = 0
 
     return {
-        "text": sent.get("text", ""),
+        "text": sent.text,
         "words": words
     }
 
@@ -1049,14 +1036,11 @@ def processar_texto(nlp, texto):
 
     resultados = []
 
-    # Trankit faz tokenização, segmentação, POS, morfologia,
-    # lematização e dependency parsing no mesmo pipeline.
-    with st.spinner("Analisando com Trankit — Ancient Greek Perseus..."):
+    with st.spinner("Analisando o grego antigo..."):
 
         doc = nlp(texto)
 
-    sentencas = doc.get("sentences", [])
-
+    sentencas = doc.sentences
     total = len(sentencas)
 
     progress = st.progress(0)
@@ -1069,10 +1053,7 @@ def processar_texto(nlp, texto):
 
         if total:
             progress.progress(
-                min(
-                    (i + 1) / total,
-                    1.0
-                )
+                min((i + 1) / total, 1.0)
             )
 
     progress.empty()
