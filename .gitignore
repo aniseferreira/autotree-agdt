@@ -1,13 +1,4 @@
-# Cache do Python
 __pycache__/
 *.py[cod]
-
-# Cache dos modelos do Trankit / PyTorch
-cache/
-.trankit/
+.trankit_cache/
 *.pt
-
-# Ambientes virtuais
-venv/
-.venv/
-env/
