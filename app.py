@@ -17,8 +17,9 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), ".trankit_cache")
 
 def prepare_trankit_offline(treebank_model: str, embedding_type: str = "xlm-roberta-base"):
     """
-    Baixa o modelo do Hugging Face, descompacta e injeta a configuração
-    local para impedir que o Trankit faça chamadas ao nlp.uoregon.edu.
+    Baixa do Hugging Face, extrai o modelo e cria manualmente os arquivos
+    de registro do Trankit (downloaded_langs.json e version.json) para
+    evitar qualquer requisição HTTP ao servidor indisponível da UOregon.
     """
     target_dir = os.path.join(CACHE_DIR, embedding_type)
     os.makedirs(target_dir, exist_ok=True)
@@ -26,7 +27,7 @@ def prepare_trankit_offline(treebank_model: str, embedding_type: str = "xlm-robe
     extracted_model_dir = os.path.join(target_dir, treebank_model)
     zip_path = os.path.join(target_dir, f"{treebank_model}.zip")
     
-    # 1. Download do Hugging Face se não existir a pasta
+    # 1. Download do Hugging Face se a pasta do modelo ainda não existir
     if not os.path.exists(extracted_model_dir):
         if not os.path.exists(zip_path):
             st.info(f"Baixando modelo {treebank_model} do Hugging Face...")
@@ -42,26 +43,24 @@ def prepare_trankit_offline(treebank_model: str, embedding_type: str = "xlm-robe
                 zip_ref.extractall(target_dir)
         st.success("Modelo extraído com sucesso!")
 
-    # 2. Bypassa o arquivo de versão remoto criando o version.json localmente
+    # 2. Cria o version.json no cache para ignorar checagem remota de versão
     version_file = os.path.join(CACHE_DIR, "version.json")
     if not os.path.exists(version_file):
         with open(version_file, "w", encoding="utf-8") as f:
             json.dump({"v1.0.0": "available"}, f)
 
-    # 3. Força o Trankit a reconhecer a linguagem no seu registro interno sem ir à rede
-    from trankit.utils.tbinfo import downloaded_langs
-    save_info_path = os.path.join(CACHE_DIR, 'downloaded_langs.json')
-    
+    # 3. Registra a linguagem diretamente no downloaded_langs.json sem imports
+    save_info_path = os.path.join(CACHE_DIR, "downloaded_langs.json")
     info = {}
     if os.path.exists(save_info_path):
         try:
-            with open(save_info_path, 'r', encoding='utf-8') as f:
+            with open(save_info_path, "r", encoding="utf-8") as f:
                 info = json.load(f)
         except Exception:
             info = {}
             
     info[treebank_model] = embedding_type
-    with open(save_info_path, 'w', encoding='utf-8') as f:
+    with open(save_info_path, "w", encoding="utf-8") as f:
         json.dump(info, f)
 
 @st.cache_resource(show_spinner="Carregando modelo linguístico Trankit na memória...")
@@ -69,10 +68,10 @@ def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
     gc.collect()
     embedding_type = "xlm-roberta-base"
     
-    # Prepara o ambiente de arquivos locais
+    # Executa a preparação física dos arquivos e metadados no cache
     prepare_trankit_offline(treebank_model, embedding_type=embedding_type)
     
-    # Inicializa o Trankit apontando para o cache que agora tem o registro local completo
+    # Inicializa o Trankit (ele lerá os JSONs criados e assumirá que tudo já foi baixado)
     pipeline = trankit.Pipeline(
         lang=treebank_model,
         embedding=embedding_type,
