@@ -12,13 +12,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# Define o caminho do cache local no repositório
 CACHE_DIR = os.path.join(os.path.dirname(__file__), ".trankit_cache")
 
-def ensure_large_model_exists(treebank_model: str):
+def ensure_large_model_exists(treebank_model: str) -> str:
     """
-    Verifica se o arquivo zip do modelo 'large' está na pasta local.
-    Se não estiver (ex: não enviado ao GitHub), faz o download pelo Hugging Face.
+    Garante a presença do arquivo .zip do modelo 'xlm-roberta-large'.
+    Retorna o caminho exato do arquivo baixado/existente.
     """
     embedding_type = "xlm-roberta-large"
     target_dir = os.path.join(CACHE_DIR, embedding_type)
@@ -28,35 +27,39 @@ def ensure_large_model_exists(treebank_model: str):
     
     # Se o arquivo zip não existir localmente, baixa do Hugging Face
     if not os.path.exists(zip_path):
-        st.info(f"Modelo local não encontrado em {zip_path}. Baixando do Hugging Face...")
+        st.info(f"Baixando o modelo {treebank_model} diretamente do Hugging Face...")
         hf_url = f"https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/{embedding_type}/{treebank_model}.zip"
         
-        with st.spinner("Baixando modelo xlm-roberta-large (~110 MB)..."):
+        with st.spinner("Baixando arquivo zip do modelo (~110 MB)..."):
             urllib.request.urlretrieve(hf_url, zip_path)
-        st.success("Download do modelo concluído!")
+        st.success("Download do arquivo zip concluído!")
+        
+    return zip_path
 
 @st.cache_resource(show_spinner="Carregando modelo linguístico Trankit (XLM-RoBERTa Large)...")
 def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
     """
-    Carrega o pipeline do Trankit utilizando explicitamente o modelo XLM-RoBERTa Large.
+    Carrega o pipeline utilizando o parâmetro no_default=True para evitar
+    qualquer tentativa de conexão HTTP com o servidor da Univ. de Oregon.
     """
     gc.collect()
     
-    # Garante a existência do arquivo na estrutura de pastas
+    # 1. Garante que o zip do Hugging Face esteja salvo no diretório
     ensure_large_model_exists(treebank_model)
     
-    # Inicializa o Trankit apontando para o embedding 'xlm-roberta-large'
+    # 2. Inicializa o pipeline em modo offline/sem requisições externas padrão
     pipeline = trankit.Pipeline(
         lang=treebank_model,
         embedding='xlm-roberta-large',
         gpu=False,
-        cache_dir=CACHE_DIR
+        cache_dir=CACHE_DIR,
+        no_default=True  # <- Bypassa a checagem remota no nlp.uoregon.edu
     )
     return pipeline
 
 def trankit_to_agdt_dataframe(doc: dict) -> pd.DataFrame:
     """
-    Converte os dicionários do Trankit no formato tabular CoNLL-U/AGDT.
+    Converte os dicionários de saída do Trankit no formato tabular CoNLL-U/AGDT.
     """
     rows = []
     for sent_idx, sent in enumerate(doc.get("sentences", []), start=1):
