@@ -3,42 +3,36 @@ import os
 import json
 import zipfile
 import urllib.request
+import requests
 import streamlit as st
 import pandas as pd
 
-# --- 1. INTERCEPTAÇÃO E CORREÇÃO DAS URLS DO TRANKIT (MONKEY PATCH) ---
-import trankit.tpipeline as tpipeline
-import trankit.utils.tbinfo as tbinfo
+# --- 1. INTERCEPTAÇÃO GLOBAL DE REDE (PATCH NO REQUESTS) ---
+# Redireciona qualquer chamada HTTP ao servidor fora do ar da UOregon para o Hugging Face.
 
-# Guarda a função de download original do urllib/requests
-def patched_download_file(url, save_path):
-    """
-    Redireciona qualquer chamada do Trankit para o servidor fora do ar (nlp.uoregon.edu)
-    para o espelho oficial e funcional do Hugging Face.
-    """
-    if "nlp.uoregon.edu" in url:
-        # Se for o zip do modelo
+_original_requests_get = requests.get
+
+def patched_requests_get(url, *args, **kwargs):
+    if isinstance(url, str) and "nlp.uoregon.edu" in url:
         if url.endswith(".zip"):
             filename = os.path.basename(url)
-            # Determina se é base ou large
-            embedding_type = "xlm-roberta-base"
-            url = f"https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/{embedding_type}/{filename}"
+            url = f"https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/xlm-roberta-base/{filename}"
         elif "available_langs.json" in url:
             url = "https://huggingface.co/uonlp/trankit/raw/main/available_langs.json"
         elif "version.json" in url:
             url = "https://huggingface.co/uonlp/trankit/raw/main/version.json"
+            
+    return _original_requests_get(url, *args, **kwargs)
 
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    
-    # Executa o download usando urllib nativo do Python
-    with st.spinner(f"Baixando recurso de {url}..."):
-        urllib.request.urlretrieve(url, save_path)
+# Aplica o patch no módulo requests global
+requests.get = patched_requests_get
 
-# Substitui a função interna de download do Trankit antes de qualquer uso
-tpipeline.download_file = patched_download_file
-tbinfo.download_file = patched_download_file
-
+# Importa o Trankit somente APÓS aplicar o patch no requests
 import trankit
+import trankit.utils.tbinfo as tbinfo
+
+# Sobrescreve a constante de URL do Trankit
+tbinfo.URL = "https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/"
 
 # --- 2. CONFIGURAÇÃO DA INTERFACE STREAMLIT ---
 
@@ -52,8 +46,7 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), ".trankit_cache")
 
 def prepare_trankit_environment(treebank_model: str, embedding_type: str = "xlm-roberta-base"):
     """
-    Baixa do Hugging Face e descompacta os arquivos do modelo na estrutura local.
-    Cria também os arquivos de índice internos (downloaded_langs.json e version.json).
+    Garante o download e descompactação dos arquivos do modelo a partir do Hugging Face.
     """
     target_dir = os.path.join(CACHE_DIR, embedding_type)
     os.makedirs(target_dir, exist_ok=True)
@@ -61,12 +54,14 @@ def prepare_trankit_environment(treebank_model: str, embedding_type: str = "xlm-
     extracted_model_dir = os.path.join(target_dir, treebank_model)
     zip_path = os.path.join(target_dir, f"{treebank_model}.zip")
     
-    # 1. Download e extração do zip
+    # Download e extração do zip
     if not os.path.exists(extracted_model_dir):
         if not os.path.exists(zip_path):
             st.info(f"Baixando modelo {treebank_model} do Hugging Face...")
             hf_url = f"https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/{embedding_type}/{treebank_model}.zip"
-            patched_download_file(hf_url, zip_path)
+            
+            with st.spinner("Baixando arquivo do modelo (~350 MB)..."):
+                urllib.request.urlretrieve(hf_url, zip_path)
             st.success("Download do modelo concluído!")
 
         st.info("Descompactando modelo...")
@@ -75,13 +70,13 @@ def prepare_trankit_environment(treebank_model: str, embedding_type: str = "xlm-
                 zip_ref.extractall(target_dir)
         st.success("Modelo descompactado!")
 
-    # 2. Cria o version.json no diretório raiz do cache
+    # Cria o version.json no diretório raiz do cache
     version_file = os.path.join(CACHE_DIR, "version.json")
     if not os.path.exists(version_file):
         with open(version_file, "w", encoding="utf-8") as f:
             json.dump({"v1.0.0": "available"}, f)
 
-    # 3. Registra a linguagem no downloaded_langs.json
+    # Registra a linguagem no downloaded_langs.json
     save_info_path = os.path.join(CACHE_DIR, "downloaded_langs.json")
     info = {}
     if os.path.exists(save_info_path):
@@ -100,10 +95,8 @@ def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
     gc.collect()
     embedding_type = "xlm-roberta-base"
     
-    # Prepara os arquivos e garante a troca da função de download
     prepare_trankit_environment(treebank_model, embedding_type=embedding_type)
     
-    # Inicializa o Trankit
     pipeline = trankit.Pipeline(
         lang=treebank_model,
         embedding=embedding_type,
