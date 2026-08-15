@@ -11,7 +11,6 @@ import pandas as pd
 _original_requests_get = requests.get
 
 def patched_requests_get(url, *args, **kwargs):
-    # Intercepta SOMENTE requisições destinadas ao servidor da UOregon
     if isinstance(url, str) and "nlp.uoregon.edu" in url:
         if url.endswith(".zip"):
             filename = os.path.basename(url)
@@ -25,12 +24,9 @@ def patched_requests_get(url, *args, **kwargs):
 
 requests.get = patched_requests_get
 
-# Importações do Trankit e Transformers após o patch
-from transformers import AutoTokenizer, AutoModel
 import trankit
 import trankit.utils.tbinfo as tbinfo
 
-# Ajusta constante interna do Trankit
 tbinfo.URL = "https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/"
 
 # --- 2. CONFIGURAÇÃO STREAMLIT ---
@@ -45,25 +41,15 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), ".trankit_cache")
 
 def prepare_trankit_environment(treebank_model: str, embedding_type: str = "xlm-roberta-base"):
     """
-    Garante que o modelo de embeddings (xlm-roberta-base) e o modelo específico
-    de árvore de dependências do Trankit estejam pré-carregados e no cache.
+    Prepara a estrutura do Trankit em disco sem carregar modelos pesados na RAM antecipadamente.
     """
-    # 1. Pré-carrega explicitamente os pesos do XLM-RoBERTa no cache do Hugging Face
-    with st.spinner("Garantindo disponibilidade do XLM-RoBERTa..."):
-        try:
-            AutoTokenizer.from_pretrained(embedding_type)
-            AutoModel.from_pretrained(embedding_type)
-        except Exception as e:
-            st.warning(f"Aviso ao verificar XLM-RoBERTa: {e}")
-
-    # 2. Prepara diretórios do Trankit
     target_dir = os.path.join(CACHE_DIR, embedding_type)
     os.makedirs(target_dir, exist_ok=True)
     
     extracted_model_dir = os.path.join(target_dir, treebank_model)
     zip_path = os.path.join(target_dir, f"{treebank_model}.zip")
     
-    # 3. Download e extração do arquivo .zip do modelo do Trankit
+    # Download e extração do zip do modelo
     if not os.path.exists(extracted_model_dir):
         if not os.path.exists(zip_path):
             st.info(f"Baixando modelo {treebank_model} do Hugging Face...")
@@ -79,7 +65,7 @@ def prepare_trankit_environment(treebank_model: str, embedding_type: str = "xlm-
                 zip_ref.extractall(target_dir)
         st.success("Modelo descompactado!")
 
-    # 4. Registra os metadados exigidos pelo Trankit
+    # Registra metadados para que o Trankit reconheça o cache local
     version_file = os.path.join(CACHE_DIR, "version.json")
     if not os.path.exists(version_file):
         with open(version_file, "w", encoding="utf-8") as f:
@@ -105,6 +91,7 @@ def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
     
     prepare_trankit_environment(treebank_model, embedding_type=embedding_type)
     
+    # Instancia a pipeline (o XLM-RoBERTa é baixado e carregado uma só vez)
     pipeline = trankit.Pipeline(
         lang=treebank_model,
         embedding=embedding_type,
