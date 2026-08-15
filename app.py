@@ -1316,47 +1316,52 @@ else:
 # ============================================================
 # BOTÃO DE ANÁLISE
 # ============================================================
+#
+# O botão fica sempre visível.
+# Quando não há texto, fica desabilitado.
+# ============================================================
 
-if texto and texto.strip():
+analisar = st.button(
+    "🔬 Analisar texto",
+    type="primary",
+    use_container_width=True,
+    disabled=not bool(texto and texto.strip())
+)
 
-    if st.button(
-        "🔬 Analisar texto",
-        type="primary",
-        use_container_width=True
-    ):
+if analisar:
 
-        try:
+    try:
 
-            nlp = carregar_pipeline()
+        nlp = carregar_pipeline()
 
-            with st.spinner(
-                "Analisando o grego antigo..."
-            ):
+        with st.spinner(
+            "Analisando o grego antigo..."
+        ):
 
-                resultado = processar_texto(
-                    nlp,
-                    texto
-                )
-
-            st.session_state[
-                "resultado"
-            ] = resultado
-
-            st.session_state[
-                "nome_base"
-            ] = nome_base
-
-            st.success(
-                f"{len(resultado)} sentença(s) analisada(s)."
+            resultado = processar_texto(
+                nlp,
+                texto
             )
 
-        except Exception as e:
+        st.session_state[
+            "resultado"
+        ] = resultado
 
-            st.error(
-                "Erro durante o processamento."
-            )
+        st.session_state[
+            "nome_base"
+        ] = nome_base
 
-            st.exception(e)
+        st.success(
+            f"{len(resultado)} sentença(s) analisada(s)."
+        )
+
+    except Exception as e:
+
+        st.error(
+            "Erro durante o processamento."
+        )
+
+        st.exception(e)
 
 # ============================================================
 # RESULTADOS
