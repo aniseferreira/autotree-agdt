@@ -179,6 +179,17 @@ def mapear_relacao_basica(w):
 
     if is_conj_subordinativa(w["text"]):
         return "AuxC"
+    # --------------------------------------------------------
+    # PREPOSIÇÕES
+    #
+    # O Stanza pode classificar uma preposição como ADV.
+    # Para o AGDT, preposições são AuxP.
+    # --------------------------------------------------------
+    
+    if text in PREPOSICOES_GREGAS:
+        w["upos"] = "ADP"
+        w["xpos"] = "r--------"
+        return "AuxP"
 
     # --------------------------------------------------------
     # VOCATIVO
