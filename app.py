@@ -1,5 +1,6 @@
 import gc
 import os
+import json
 import zipfile
 import urllib.request
 import streamlit as st
@@ -14,19 +15,18 @@ st.set_page_config(
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), ".trankit_cache")
 
-def ensure_model_exists_and_unpacked(treebank_model: str, embedding_type: str = "xlm-roberta-base"):
+def prepare_trankit_offline(treebank_model: str, embedding_type: str = "xlm-roberta-base"):
     """
-    Baixa o arquivo .zip do Hugging Face e o descompacta na pasta de cache.
-    O Trankit só reconhece o modelo local se a pasta estiver descompactada.
+    Baixa o modelo do Hugging Face, descompacta e injeta a configuração
+    local para impedir que o Trankit faça chamadas ao nlp.uoregon.edu.
     """
     target_dir = os.path.join(CACHE_DIR, embedding_type)
     os.makedirs(target_dir, exist_ok=True)
     
-    # Caminho onde o Trankit espera encontrar os arquivos descompactados
     extracted_model_dir = os.path.join(target_dir, treebank_model)
     zip_path = os.path.join(target_dir, f"{treebank_model}.zip")
     
-    # Se a pasta do modelo descompactado não existir, faz o download e extração
+    # 1. Download do Hugging Face se não existir a pasta
     if not os.path.exists(extracted_model_dir):
         if not os.path.exists(zip_path):
             st.info(f"Baixando modelo {treebank_model} do Hugging Face...")
@@ -34,23 +34,45 @@ def ensure_model_exists_and_unpacked(treebank_model: str, embedding_type: str = 
             
             with st.spinner("Baixando arquivo do modelo (~350 MB)..."):
                 urllib.request.urlretrieve(hf_url, zip_path)
-            st.success("Download concluído!")
+            st.success("Download do Hugging Face concluído!")
 
         st.info("Descompactando modelo para uso local...")
         with st.spinner("Extraindo arquivos de peso..."):
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(target_dir)
-        st.success("Modelo descompactado com sucesso!")
+        st.success("Modelo extraído com sucesso!")
+
+    # 2. Bypassa o arquivo de versão remoto criando o version.json localmente
+    version_file = os.path.join(CACHE_DIR, "version.json")
+    if not os.path.exists(version_file):
+        with open(version_file, "w", encoding="utf-8") as f:
+            json.dump({"v1.0.0": "available"}, f)
+
+    # 3. Força o Trankit a reconhecer a linguagem no seu registro interno sem ir à rede
+    from trankit.utils.tbinfo import downloaded_langs
+    save_info_path = os.path.join(CACHE_DIR, 'downloaded_langs.json')
+    
+    info = {}
+    if os.path.exists(save_info_path):
+        try:
+            with open(save_info_path, 'r', encoding='utf-8') as f:
+                info = json.load(f)
+        except Exception:
+            info = {}
+            
+    info[treebank_model] = embedding_type
+    with open(save_info_path, 'w', encoding='utf-8') as f:
+        json.dump(info, f)
 
 @st.cache_resource(show_spinner="Carregando modelo linguístico Trankit na memória...")
 def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
     gc.collect()
     embedding_type = "xlm-roberta-base"
     
-    # 1. Garante que o zip foi baixado e descompactado
-    ensure_model_exists_and_unpacked(treebank_model, embedding_type=embedding_type)
+    # Prepara o ambiente de arquivos locais
+    prepare_trankit_offline(treebank_model, embedding_type=embedding_type)
     
-    # 2. Inicializa o Trankit (ele encontrará os arquivos descompactados e não acessará a rede)
+    # Inicializa o Trankit apontando para o cache que agora tem o registro local completo
     pipeline = trankit.Pipeline(
         lang=treebank_model,
         embedding=embedding_type,
