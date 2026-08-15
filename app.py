@@ -790,17 +790,22 @@ def aplicar_participios_substantivados(words):
 
 def aplicar_infinitivo_sujeito(words):
     """
-    Corrige infinitivos que funcionam como sujeito.
+    Trata a construção em que um infinitivo é o sujeito de um
+    predicado nominal/adjetival.
 
-    Se o Stanza já os marcou como csubj/csubj:pass, a função AGDT
-    é SBJ. Para um infinitivo que o parser deixou como root,
-    procuramos um predicado nominal/adjetival compatível.
+    Exemplo:
+        Φοβεῖσθαι οὐδενὶ ἀγαθόν
 
-    O head 0 representa a raiz da árvore AGDT; não é criado como
-    token visível no XML.
+    AGDT:
+        [0] PRED
+        ├── Φοβεῖσθαι SBJ
+        ├── οὐδενί ADV
+        └── ἀγαθόν PNOM
+
+    O token artificial [0] é acrescentado ao final da sentença.
     """
 
-    for infinitivo in words:
+    for infinitivo in list(words):
 
         if infinitivo["upos"] != "VERB":
             continue
@@ -809,40 +814,151 @@ def aplicar_infinitivo_sujeito(words):
         if "VerbForm=Inf" not in feats:
             continue
 
+        # Caso já reconhecido pelo parser como sujeito oracional.
         if infinitivo["deprel"] in {"csubj", "csubj:pass"}:
             infinitivo["new_rel"] = "SBJ"
             continue
 
-        if infinitivo["deprel"] != "root":
+        # Caso importante: infinitivo já convertido para SBJ e
+        # dependente de um adjetivo/nome que estava na raiz.
+        if infinitivo["new_rel"] != "SBJ":
             continue
 
-        candidatos = [
-            w for w in words
-            if (
-                w["id"] != infinitivo["id"]
-                and w["head"] == infinitivo["id"]
-                and w["upos"] in {"ADJ", "NOUN", "PROPN"}
-            )
-        ]
-
-        if not candidatos:
-            continue
-
-        pred = next(
-            (
-                w for w in candidatos
-                if w["deprel"] in {"xcomp", "obj", "obl", "nmod"}
-            ),
-            None
-        )
+        pred_id = infinitivo["new_head"]
+        pred = get_word(words, pred_id)
 
         if pred is None:
             continue
 
-        pred["new_rel"] = "PRED"
-        pred["new_head"] = 0
+        if pred["upos"] not in {"ADJ", "NOUN", "PROPN"}:
+            continue
+
+        # O predicativo nominal/adjetival não pode ser PRED.
+        pred["new_rel"] = "PNOM"
+
+        # O artificial PRED recebe um novo ID após os tokens reais.
+        artificial_id = max(int(w["id"]) for w in words) + 1
+
+        artificial = {
+            "id": artificial_id,
+            "text": "[0]",
+            "lemma": "_",
+            "upos": "_",
+            "xpos": "_",
+            "feats": "_",
+            "head": 0,
+            "deprel": "root",
+            "new_rel": "PRED",
+            "new_head": 0,
+            "artificial": True,
+            "insertion_id": "0003e",
+        }
+
+        # Reposicionar a raiz sintática.
         infinitivo["new_rel"] = "SBJ"
-        infinitivo["new_head"] = pred["id"]
+        infinitivo["new_head"] = artificial_id
+
+        pred["new_head"] = artificial_id
+
+        # Dependentes diretos do predicado original passam para o
+        # PRED artificial, conservando a função quando possível.
+        for child in words:
+            if child["id"] == pred["id"]:
+                continue
+            if child["new_head"] != pred["id"]:
+                continue
+
+            # Neste padrão, o dativo de referência é ADV.
+            feats_child = child.get("feats") or ""
+            if (
+                "Case=Dat" in feats_child
+                and child["new_rel"] == "ATR"
+            ):
+                child["new_rel"] = "ADV"
+
+            child["new_head"] = artificial_id
+
+        words.append(artificial)
+        break
+
+
+
+# ============================================================
+# CORREÇÕES ESTRUTURAIS AGDT — INFINITIVO + COORDENAÇÃO
+# ============================================================
+
+def corrigir_coordenacao_de_oracao_subordinada(words):
+    """
+    Depois das pontes AuxC, garante a arquitetura:
+
+        AuxC
+          │
+        COORD
+        /   \
+      X_CO  Y_CO
+
+    quando a coordenação é interna à oração introduzida por AuxC.
+
+    Não propaga _CO para subordinadas internas.
+    """
+
+    # Localizar AuxC que introduz uma oração contendo uma coordenação.
+    for auxc in words:
+        if auxc["new_rel"] != "AuxC":
+            continue
+
+        # COORD diretamente associado ao contexto dessa subordinada.
+        coords = [
+            w for w in words
+            if (
+                w["new_rel"] == "COORD"
+                and (
+                    w["new_head"] == auxc["id"]
+                    or w["head"] == auxc["id"]
+                )
+            )
+        ]
+
+        for coord in coords:
+            coord["new_head"] = auxc["id"]
+
+            membros = [
+                w for w in words
+                if w["new_head"] == coord["id"]
+                and w["new_rel"].endswith("_CO")
+            ]
+
+            for membro in membros:
+                # _CO somente em membros diretos.
+                membro["new_head"] = coord["id"]
+
+    # Caso em que o COORD ainda está ligado ao head anterior do AuxC:
+    # se houver dois predicados _CO no mesmo grupo, unificá-los sob
+    # o mesmo COORD.
+    for coord in [w for w in words if w["new_rel"] == "COORD"]:
+        membros = [
+            w for w in words
+            if w["new_rel"].endswith("_CO")
+        ]
+
+        # Não fazemos reagrupamento global: apenas se já houver
+        # pelo menos dois membros ligados ao próprio coord.
+        ligados = [
+            w for w in membros
+            if w["new_head"] == coord["id"]
+        ]
+
+        if len(ligados) >= 2:
+            continue
+
+
+def garantir_auxk_na_root(words):
+    """
+    AuxK sempre depende diretamente da ROOT AGDT.
+    """
+    for w in words:
+        if w["new_rel"] == "AuxK":
+            w["new_head"] = 0
 
 
 # ============================================================
@@ -871,20 +987,26 @@ def converter_sentenca(sent):
     # 6. copula
     aplicar_copula(words)
 
-    # 7. Coordenação — somente membros diretos
-    aplicar_coordenacao(words)
-
-    # 8. AuxP
-    aplicar_auxp(words)
-
-    # 9. AuxC
+    # 7. AuxC — ponte sintática antes da reconstrução da coordenação
     aplicar_auxc(words)
 
-    # 10. artigos
+    # 8. Coordenação — somente membros diretos
+    aplicar_coordenacao(words)
+
+    # 9. AuxP
+    aplicar_auxp(words)
+
+    # 10. Coordenação de oração subordinada
+    corrigir_coordenacao_de_oracao_subordinada(words)
+
+    # 11. artigos
     aplicar_artigos_repetidos(words)
 
-    # 11. pontuação
+    # 12. pontuação
     corrigir_pontuacao_em_coordenacao(words)
+
+    # 13. AuxK sempre na ROOT
+    garantir_auxk_na_root(words)
 
     # --------------------------------------------------------
     # Garantia final de head
@@ -1033,10 +1155,20 @@ def gerar_agdt_xml(
 
         for w in sent["words"]:
 
-            ET.SubElement(
-                sentence,
-                "word",
-                {
+            # Tokens artificiais AGDT (ex.: [0]) não recebem
+            # postag/lemma lexical; usam a marcação específica
+            # do formato ALDT/AGDT.
+            if w.get("artificial"):
+                attrs = {
+                    "id": str(w["id"]),
+                    "insertion_id": w.get("insertion_id", "0003e"),
+                    "artificial": "elliptic",
+                    "relation": w["new_rel"],
+                    "form": w["text"],
+                    "head": str(w["new_head"]),
+                }
+            else:
+                attrs = {
                     "id": str(w["id"]),
                     "form": w["text"],
                     "lemma": w["lemma"],
@@ -1044,6 +1176,11 @@ def gerar_agdt_xml(
                     "head": str(w["new_head"]),
                     "relation": w["new_rel"]
                 }
+
+            ET.SubElement(
+                sentence,
+                "word",
+                attrs
             )
 
     xml_bytes = ET.tostring(
