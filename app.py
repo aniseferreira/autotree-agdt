@@ -2,7 +2,7 @@ import io
 import gc
 import re
 import streamlit as st
-import stanza
+from trankit import Pipeline
 import pandas as pd
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
@@ -18,28 +18,21 @@ st.set_page_config(
     layout="wide"
 )
 
+st.caption("Parser automático: Trankit — UD Ancient Greek Perseus")
+
 
 # ============================================================
-# STANZA
+# TRANKIT — ANCIENT GREEK PERSEUS
 # ============================================================
 
 @st.cache_resource(show_spinner=False)
 def carregar_pipeline():
 
-    stanza.download(
-        "grc",
-        package="perseus",
-        processors="tokenize,lemma,pos,depparse"
+    return Pipeline(
+        "ancient-greek-perseus",
+        gpu=False,
+        cache_dir="./trankit_cache"
     )
-
-    return stanza.Pipeline(
-        lang="grc",
-        package="perseus",
-        processors="tokenize,lemma,pos,depparse",
-        tokenize_no_ssplit=True,
-        verbose=False
-    )
-
 
 # ============================================================
 # CONSTANTES AGDT
@@ -121,29 +114,45 @@ def is_conj_subordinativa(word):
 # ============================================================
 
 def construir_words(sent):
+    """
+    Converte uma sentença Trankit (dict) para a estrutura interna
+    usada pelo conversor UD -> AGDT.
+
+    Trankit retorna:
+        sent["tokens"] = [
+            {
+                "id": ...,
+                "text": ...,
+                "lemma": ...,
+                "upos": ...,
+                "xpos": ...,
+                "feats": ...,
+                "head": ...,
+                "deprel": ...
+            }
+        ]
+    """
 
     words = []
 
-    for word in sent.words:
+    for token in sent.get("tokens", []):
 
-        deprel = word.deprel or "_"
+        deprel = token.get("deprel") or "_"
 
-        # Mantemos a relação UD original intacta.
         words.append({
-            "id": int(word.id),
-            "text": word.text,
-            "lemma": word.lemma or "_",
-            "upos": word.upos or "_",
-            "xpos": word.xpos or "_",
-            "feats": word.feats or "_",
-            "head": int(word.head),
+            "id": int(token["id"]),
+            "text": token.get("text") or "_",
+            "lemma": token.get("lemma") or "_",
+            "upos": token.get("upos") or "_",
+            "xpos": token.get("xpos") or "_",
+            "feats": token.get("feats") or "_",
+            "head": int(token.get("head", 0)),
             "deprel": deprel,
             "new_rel": None,
             "new_head": None
         })
 
     return words
-
 
 # ============================================================
 # MAPEAMENTO UD → AGDT BÁSICO
@@ -1027,7 +1036,7 @@ def converter_sentenca(sent):
             w["new_head"] = 0
 
     return {
-        "text": sent.text,
+        "text": sent.get("text", ""),
         "words": words
     }
 
@@ -1038,27 +1047,25 @@ def converter_sentenca(sent):
 
 def processar_texto(nlp, texto):
 
-    linhas = [
-        linha.strip()
-        for linha in texto.splitlines()
-        if linha.strip()
-    ]
-
     resultados = []
 
-    total = len(linhas)
+    # Trankit faz tokenização, segmentação, POS, morfologia,
+    # lematização e dependency parsing no mesmo pipeline.
+    with st.spinner("Analisando com Trankit — Ancient Greek Perseus..."):
+
+        doc = nlp(texto)
+
+    sentencas = doc.get("sentences", [])
+
+    total = len(sentencas)
 
     progress = st.progress(0)
 
-    for i, linha in enumerate(linhas):
+    for i, sent in enumerate(sentencas):
 
-        doc = nlp(linha)
-
-        for sent in doc.sentences:
-
-            resultados.append(
-                converter_sentenca(sent)
-            )
+        resultados.append(
+            converter_sentenca(sent)
+        )
 
         if total:
             progress.progress(
@@ -1068,13 +1075,10 @@ def processar_texto(nlp, texto):
                 )
             )
 
-        if i % 50 == 0:
-            gc.collect()
-
     progress.empty()
+    gc.collect()
 
     return resultados
-
 
 # ============================================================
 # CONLL-U
