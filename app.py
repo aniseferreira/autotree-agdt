@@ -18,15 +18,14 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 @st.cache_resource(show_spinner="Carregando modelo linguístico (isso pode levar de 1 a 2 minutos na primeira execução)...")
 def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
     """
-    Carrega o pipeline do Trankit com parâmetros suportados nativamente.
+    Carrega o pipeline do Trankit configurado com o identificador de linguagem correto.
     """
-    # Força liberação de RAM antes de instanciar o modelo
     gc.collect()
     
     pipeline = trankit.Pipeline(
         lang=treebank_model,
-        gpu=False,           # Força execução em CPU no Streamlit Cloud
-        cache_dir=CACHE_DIR  # Armazena os modelos baixados nesta pasta local
+        gpu=False,           # CPU para o Streamlit Cloud
+        cache_dir=CACHE_DIR
     )
     return pipeline
 
@@ -58,12 +57,12 @@ st.markdown(
     "**Ancient Greek Dependency Treebank (AGDT / Perseids)** usando o backend **Trankit**."
 )
 
-# Barra Lateral
+# Barra Lateral - Nomes corrigidos usando hífens ('ancient-greek-perseus')
 st.sidebar.header("Configurações")
 model_choice = st.sidebar.selectbox(
     "Modelo de Treebank Grego:",
-    ["ancient_greek-perseus", "ancient_greek-proiel"],
-    help="O modelo 'perseus' é alinhado às convenções do AGDT/Perseids."
+    ["ancient-greek-perseus", "ancient-greek-proiel"],
+    help="O modelo 'ancient-greek-perseus' é alinhado às convenções do AGDT/Perseids."
 )
 
 st.sidebar.markdown("---")
@@ -81,7 +80,6 @@ input_text = st.text_area(
 if st.button("Analisar Dependências", type="primary"):
     if input_text.strip():
         try:
-            # Carrega o pipeline com os argumentos aceitos
             nlp = load_trankit_pipeline(model_choice)
             
             with st.spinner("Processando morfossintaxe e parse de dependências..."):
@@ -109,7 +107,6 @@ if st.button("Analisar Dependências", type="primary"):
             st.error(f"Ocorreu um erro durante o processamento: {str(e)}")
             
         finally:
-            # Garante a liberação de memória após o ciclo
             gc.collect()
     else:
         st.warning("Por favor, insira um texto para analisar.")
