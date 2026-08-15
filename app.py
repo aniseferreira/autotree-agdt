@@ -1185,37 +1185,71 @@ st.divider()
 
 
 # ============================================================
-# UPLOAD
+# ENTRADA
 # ============================================================
 
-arquivo = st.file_uploader(
-    "Arquivo de texto grego antigo",
-    type=["txt"]
+st.subheader("Entrada do texto")
+
+modo_entrada = st.radio(
+    "Escolha a forma de entrada:",
+    [
+        "Frase / texto curto",
+        "Arquivo .txt"
+    ],
+    horizontal=True
 )
 
-if arquivo:
+texto = None
+nome_base = "teste_agdt"
 
-    nome_base = arquivo.name.rsplit(
-        ".",
-        1
-    )[0]
+# ============================================================
+# FRASE / TEXTO CURTO
+# ============================================================
 
-    texto = arquivo.getvalue().decode(
-        "utf-8"
-    )
+if modo_entrada == "Frase / texto curto":
 
-    st.success(
-        f"Arquivo carregado: {arquivo.name}"
-    )
-
-    with st.expander(
-        "Ver texto de entrada"
-    ):
-        st.text_area(
-            "Texto",
-            texto,
-            height=250
+    texto = st.text_area(
+        "Digite uma ou mais frases em grego antigo:",
+        height=150,
+        placeholder=(
+            "Ex.: καὶ γὰρ οἱ κύβοι ἀριθμὸν περιέχουσι "
+            "καὶ ψῆφοι λέγονται."
         )
+    )
+
+    nome_base = "teste_agdt"
+
+# ============================================================
+# ARQUIVO
+# ============================================================
+
+else:
+
+    arquivo = st.file_uploader(
+        "Arquivo de texto grego antigo",
+        type=["txt"]
+    )
+
+    if arquivo:
+
+        nome_base = arquivo.name.rsplit(
+            ".",
+            1
+        )[0]
+
+        texto = arquivo.getvalue().decode(
+            "utf-8"
+        )
+
+        st.success(
+            f"Arquivo carregado: {arquivo.name}"
+        )
+
+# ============================================================
+# BOTÃO DE ANÁLISE
+# ============================================================
+
+if texto and texto.strip():
 
     if st.button(
         "🔬 Analisar texto",
@@ -1245,7 +1279,7 @@ if arquivo:
             ] = nome_base
 
             st.success(
-                f"{len(resultado)} sentenças analisadas."
+                f"{len(resultado)} sentença(s) analisada(s)."
             )
 
         except Exception as e:
@@ -1255,7 +1289,6 @@ if arquivo:
             )
 
             st.exception(e)
-
 
 # ============================================================
 # RESULTADOS
