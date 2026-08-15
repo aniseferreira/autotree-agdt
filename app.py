@@ -17,7 +17,7 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), ".trankit_cache")
 def ensure_model_exists(treebank_model: str, embedding_type: str = "xlm-roberta-base") -> str:
     """
     Garante a presença do arquivo .zip do modelo no diretório local.
-    Baixa do Hugging Face caso não exista (evitando timeout no Oregon).
+    Baixa do Hugging Face caso não exista.
     """
     target_dir = os.path.join(CACHE_DIR, embedding_type)
     os.makedirs(target_dir, exist_ok=True)
@@ -34,11 +34,10 @@ def ensure_model_exists(treebank_model: str, embedding_type: str = "xlm-roberta-
         
     return zip_path
 
-@st.cache_resource(show_spinner="Carregando modelo linguístico Trankit...")
+@st.cache_resource(show_spinner="Carregando modelo linguístico Trankit na memória...")
 def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
     """
-    Carrega o pipeline com no_remote=True para bloquear requisições ao nlp.uoregon.edu
-    e utiliza 'xlm-roberta-base' para respeitar o limite de 1 GB de RAM do Streamlit Cloud.
+    Carrega o pipeline do Trankit utilizando o arquivo local recém-baixado.
     """
     gc.collect()
     
@@ -47,13 +46,12 @@ def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
     # 1. Garante que o arquivo zip está presente localmente
     ensure_model_exists(treebank_model, embedding_type=embedding_type)
     
-    # 2. Inicializa o pipeline em modo offline/no_remote
+    # 2. Inicializa o pipeline normalmente com os argumentos aceitos
     pipeline = trankit.Pipeline(
         lang=treebank_model,
         embedding=embedding_type,
         gpu=False,
-        cache_dir=CACHE_DIR,
-        no_remote=True  # <- Parâmetro correto para impedir chamadas externas ao servidor da UOregon
+        cache_dir=CACHE_DIR
     )
     return pipeline
 
