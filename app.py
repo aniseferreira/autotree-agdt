@@ -1,11 +1,11 @@
 import gc
 import os
+import zipfile
 import urllib.request
 import streamlit as st
 import pandas as pd
 import trankit
 
-# Configuração da página do Streamlit
 st.set_page_config(
     page_title="Anotador AGDT (Trankit)",
     page_icon="🏛️",
@@ -14,39 +14,43 @@ st.set_page_config(
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), ".trankit_cache")
 
-def ensure_model_exists(treebank_model: str, embedding_type: str = "xlm-roberta-base") -> str:
+def ensure_model_exists_and_unpacked(treebank_model: str, embedding_type: str = "xlm-roberta-base"):
     """
-    Garante a presença do arquivo .zip do modelo no diretório local.
-    Baixa do Hugging Face caso não exista.
+    Baixa o arquivo .zip do Hugging Face e o descompacta na pasta de cache.
+    O Trankit só reconhece o modelo local se a pasta estiver descompactada.
     """
     target_dir = os.path.join(CACHE_DIR, embedding_type)
     os.makedirs(target_dir, exist_ok=True)
     
+    # Caminho onde o Trankit espera encontrar os arquivos descompactados
+    extracted_model_dir = os.path.join(target_dir, treebank_model)
     zip_path = os.path.join(target_dir, f"{treebank_model}.zip")
     
-    if not os.path.exists(zip_path):
-        st.info(f"Baixando modelo {treebank_model} ({embedding_type}) do Hugging Face...")
-        hf_url = f"https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/{embedding_type}/{treebank_model}.zip"
-        
-        with st.spinner("Baixando arquivo do modelo (~350 MB)..."):
-            urllib.request.urlretrieve(hf_url, zip_path)
-        st.success("Download do modelo concluído!")
-        
-    return zip_path
+    # Se a pasta do modelo descompactado não existir, faz o download e extração
+    if not os.path.exists(extracted_model_dir):
+        if not os.path.exists(zip_path):
+            st.info(f"Baixando modelo {treebank_model} do Hugging Face...")
+            hf_url = f"https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/{embedding_type}/{treebank_model}.zip"
+            
+            with st.spinner("Baixando arquivo do modelo (~350 MB)..."):
+                urllib.request.urlretrieve(hf_url, zip_path)
+            st.success("Download concluído!")
+
+        st.info("Descompactando modelo para uso local...")
+        with st.spinner("Extraindo arquivos de peso..."):
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(target_dir)
+        st.success("Modelo descompactado com sucesso!")
 
 @st.cache_resource(show_spinner="Carregando modelo linguístico Trankit na memória...")
 def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
-    """
-    Carrega o pipeline do Trankit utilizando o arquivo local recém-baixado.
-    """
     gc.collect()
-    
     embedding_type = "xlm-roberta-base"
     
-    # 1. Garante que o arquivo zip está presente localmente
-    ensure_model_exists(treebank_model, embedding_type=embedding_type)
+    # 1. Garante que o zip foi baixado e descompactado
+    ensure_model_exists_and_unpacked(treebank_model, embedding_type=embedding_type)
     
-    # 2. Inicializa o pipeline normalmente com os argumentos aceitos
+    # 2. Inicializa o Trankit (ele encontrará os arquivos descompactados e não acessará a rede)
     pipeline = trankit.Pipeline(
         lang=treebank_model,
         embedding=embedding_type,
@@ -56,9 +60,6 @@ def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
     return pipeline
 
 def trankit_to_agdt_dataframe(doc: dict) -> pd.DataFrame:
-    """
-    Converte a estrutura de dicionários do Trankit no formato tabular CoNLL-U/AGDT.
-    """
     rows = []
     for sent_idx, sent in enumerate(doc.get("sentences", []), start=1):
         for token in sent.get("tokens", []):
@@ -90,7 +91,6 @@ model_choice = st.sidebar.selectbox(
     help="O modelo 'ancient-greek-perseus' segue o padrão AGDT/Perseids."
 )
 
-# Entrada de Texto
 default_text = "Μῆνιν ἄειδε θεὰ Πηληϊάδεω Ἀχιλῆος"
 input_text = st.text_area(
     "Texto em Grego Antigo:",
@@ -109,11 +109,9 @@ if st.button("Analisar Dependências", type="primary"):
             
             st.success("Análise concluída com sucesso!")
             
-            # Exibição dos resultados
             st.subheader("Tabela de Anotação (Padrão CoNLL-U / AGDT)")
             st.dataframe(df_agdt, use_container_width=True)
             
-            # Botão de Download
             tsv_data = df_agdt.to_csv(sep="\t", index=False)
             st.download_button(
                 label="📥 Baixar Anotações (TSV / CoNLL-U)",
