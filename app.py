@@ -262,6 +262,43 @@ def mapear_relacao_basica(w):
         return "AuxG"
 
     # --------------------------------------------------------
+    # ADJETIVO SUBSTANTIVADO
+    #
+    # Um ADJ não deve ser automaticamente ATR.
+    #
+    # Se o adjetivo estiver funcionando como argumento de
+    # um verbo, preservamos a função sintática correspondente.
+    # --------------------------------------------------------
+    
+    if w["upos"] == "ADJ":
+    
+        if rel in {
+            "obj",
+            "iobj",
+            "obl",
+            "obl:arg",
+            "nsubj",
+            "nsubj:pass",
+            "csubj"
+        }:
+    
+            if rel in {
+                "nsubj",
+                "nsubj:pass",
+                "csubj"
+            }:
+                return "SBJ"
+    
+            if rel in {
+                "obj",
+                "iobj",
+                "obl:arg"
+            }:
+                return "OBJ"
+    
+            if rel == "obl":
+                return "ADV"
+    # --------------------------------------------------------
     # MAPA GERAL
     # --------------------------------------------------------
 
