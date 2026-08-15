@@ -492,128 +492,309 @@ def aplicar_auxv(words):
 # COORDENAÇÃO
 # ============================================================
 
+# ============================================================
+# COORDENAÇÃO UD → AGDT
+# ============================================================
+
 def aplicar_coordenacao(words):
-
     """
-    Regra AGDT:
+    Converte coordenações da UD para a estrutura AGDT.
 
-    - o ÚLTIMO coordenador é o COORD verdadeiro;
-    - coordenadores anteriores dependem dele por AuxY;
-    - os elementos coordenados dependem do COORD;
-    - recebem a função sintática + _CO.
+    Regras AGDT:
+    1. 'conj' é uma relação UD e nunca deve aparecer no AGDT.
+    2. O último elemento coordenador é COORD.
+    3. Os elementos coordenados dependem de COORD.
+    4. Todos os elementos coordenados recebem:
+           função sintática + _CO
+    5. Conjunções anteriores ao último coordenador recebem AuxY.
 
-    Não tratamos AuxX como ponte.
+    Exemplo simples:
+
+        UD:
+            περιέχουσι   root
+            λέγονται     conj
+            καί           cc
+
+        AGDT:
+
+                         COORD
+                           καί
+                         /   \
+                PRED_CO       PRED_CO
+              περιέχουσι     λέγονται
+
+
+    Coordenação múltipla:
+
+        A καὶ B καὶ C
+
+        AGDT:
+
+                         COORD
+                           καὶ
+                    /      |      \
+                 A_CO     B_CO     C_CO
+                           ↑
+                         AuxY
+                           καὶ
+
+    A função sintática dos elementos coordenados é herdada
+    do primeiro elemento.
     """
 
     # --------------------------------------------------------
-    # Encontrar todos os tokens que o UD marcou como cc.
+    # 1. Localizar todos os elementos que a UD marcou como
+    #    "conj".
     # --------------------------------------------------------
 
-    coordenadores = [
+    elementos_conj = [
         w for w in words
-        if w["deprel"] == "cc"
+        if w["deprel"].split(":")[0] == "conj"
     ]
 
-    if not coordenadores:
+    if not elementos_conj:
         return
 
-    # Agrupamos por head UD
+    # --------------------------------------------------------
+    # 2. Agrupar elementos coordenados pelo primeiro elemento.
+    #
+    #    Em UD:
+    #
+    #       A ← head de B
+    #       A ← head de C
+    #
+    #    para:
+    #
+    #       A e B e C
+    #
+    #    Portanto todos os "conj" que têm o mesmo head
+    #    pertencem à mesma coordenação.
+    # --------------------------------------------------------
+
     grupos = {}
 
-    for coord in coordenadores:
+    for segundo in elementos_conj:
 
-        grupos.setdefault(
-            coord["head"],
-            []
-        ).append(coord)
-
-    for primeiro_head, coords in grupos.items():
-
-        # ----------------------------------------------------
-        # Coordenadores ligados ao mesmo elemento UD.
-        #
-        # O coordenador AGDT verdadeiro é o último.
-        # ----------------------------------------------------
-
-        coords = sorted(
-            coords,
-            key=lambda x: x["id"]
+        head_id = str(
+            segundo["head"]
         )
 
-        coord_real = coords[-1]
+        grupos.setdefault(
+            head_id,
+            []
+        ).append(segundo)
 
-        # ----------------------------------------------------
-        # Elementos coordenados:
-        #
-        # procuramos os 'conj' associados ao primeiro
-        # elemento.
-        # ----------------------------------------------------
+    # --------------------------------------------------------
+    # 3. Processar cada coordenação separadamente.
+    # --------------------------------------------------------
 
-        conj_children = [
-            w for w in words
-            if (
-                w["deprel"] == "conj"
-                and w["head"] == primeiro_head
-            )
-        ]
+    for primeiro_id, segundos in grupos.items():
 
         primeiro = get_word(
             words,
-            primeiro_head
+            primeiro_id
         )
 
         if primeiro is None:
             continue
 
-        elementos = [primeiro] + conj_children
-
         # ----------------------------------------------------
-        # Relação que cada elemento teria em relação ao
-        # head da coordenação.
+        # Ordenar os elementos pela posição no texto.
         # ----------------------------------------------------
 
-        coord_parent = primeiro["new_head"]
+        segundos.sort(
+            key=lambda w: int(w["id"])
+        )
+
+        elementos = [
+            primeiro
+        ] + segundos
+
+        elementos.sort(
+            key=lambda w: int(w["id"])
+        )
 
         # ----------------------------------------------------
-        # Coordenador verdadeiro
+        # Determinar a função sintática do primeiro elemento.
         # ----------------------------------------------------
+
+        funcao_base = primeiro.get(
+            "new_rel"
+        )
+
+        if not funcao_base:
+
+            funcao_base = mapear_relacao_basica(
+                primeiro
+            )
+
+        # ----------------------------------------------------
+        # NUNCA permitir que uma relação UD sobreviva.
+        # ----------------------------------------------------
+
+        if funcao_base in {
+            "conj",
+            "cc"
+        }:
+            funcao_base = "PRED"
+
+        # Se já houver _CO, remover para evitar:
+        #
+        # PRED_CO_CO
+        #
+        if funcao_base.endswith(
+            "_CO"
+        ):
+            funcao_base = funcao_base[:-3]
+
+        # ----------------------------------------------------
+        # 4. Encontrar as conjunções associadas ao grupo.
+        # ----------------------------------------------------
+
+        primeiro_pos = int(
+            primeiro["id"]
+        )
+
+        ultima_pos = int(
+            elementos[-1]["id"]
+        )
+
+        conjuncoes = []
+
+        for w in words:
+
+            if (
+                w["deprel"].split(":")[0]
+                != "cc"
+            ):
+                continue
+
+            wid = int(w["id"])
+
+            # A conjunção deve estar na região da coordenação.
+            if not (
+                primeiro_pos
+                < wid
+                <= ultima_pos
+            ):
+                continue
+
+            # Aceitamos:
+            #
+            # cc ligado ao primeiro elemento
+            # ou cc ligado a algum elemento coordenado.
+            head = str(
+                w["head"]
+            )
+
+            ids_elementos = {
+                str(e["id"])
+                for e in elementos
+            }
+
+            if head in ids_elementos:
+                conjuncoes.append(w)
+
+        # ----------------------------------------------------
+        # 5. Se não houver cc explícito, ainda corrigimos
+        #    "conj" para função_CO.
+        # ----------------------------------------------------
+
+        if not conjuncoes:
+
+            for elemento in elementos:
+
+                if elemento is primeiro:
+                    continue
+
+                elemento["new_rel"] = (
+                    f"{funcao_base}_CO"
+                )
+
+            continue
+
+        # ----------------------------------------------------
+        # Ordenar conjunções.
+        # ----------------------------------------------------
+
+        conjuncoes.sort(
+            key=lambda w: int(w["id"])
+        )
+
+        # ----------------------------------------------------
+        # 6. O ÚLTIMO coordenador é o COORD verdadeiro.
+        # ----------------------------------------------------
+
+        coord_real = conjuncoes[-1]
+
+        coord_id = str(
+            coord_real["id"]
+        )
+
+        antigo_head = str(
+            primeiro["new_head"]
+        )
 
         coord_real["new_rel"] = "COORD"
-        coord_real["new_head"] = coord_parent
+
+        coord_real["new_head"] = (
+            antigo_head
+        )
 
         # ----------------------------------------------------
-        # Coordenadores anteriores
-        #
-        # dependem do último coordenador por AuxY.
-        # ----------------------------------------------------
-
-        for anterior in coords[:-1]:
-
-            anterior["new_rel"] = "AuxY"
-            anterior["new_head"] = coord_real["id"]
-
-        # ----------------------------------------------------
-        # Elementos coordenados
+        # 7. Todos os elementos coordenados recebem
+        #    função + _CO e dependem do COORD.
         # ----------------------------------------------------
 
         for elemento in elementos:
 
-            # Não permitir que o próprio COORD seja tratado
-            # como elemento coordenado.
-            if elemento["id"] == coord_real["id"]:
-                continue
+            elemento["new_rel"] = (
+                f"{funcao_base}_CO"
+            )
 
-            rel = elemento["new_rel"]
+            elemento["new_head"] = (
+                coord_id
+            )
 
-            if rel is None:
-                rel = "ATR"
+        # ----------------------------------------------------
+        # 8. Restaurar COORD depois de alterar os elementos.
+        # ----------------------------------------------------
 
-            # Evita duplicar _CO
-            if not rel.endswith("_CO"):
-                elemento["new_rel"] = f"{rel}_CO"
+        coord_real["new_rel"] = "COORD"
 
-            elemento["new_head"] = coord_real["id"]
+        coord_real["new_head"] = (
+            antigo_head
+        )
 
+        # ----------------------------------------------------
+        # 9. Todas as conjunções anteriores ao último
+        #    são AuxY.
+        # ----------------------------------------------------
+
+        for conj_anterior in conjuncoes[:-1]:
+
+            conj_anterior["new_rel"] = "AuxY"
+
+            conj_anterior["new_head"] = (
+                coord_id
+            )
+
+        # ----------------------------------------------------
+        # 10. Segurança:
+        # nenhum elemento UD "conj" pode chegar ao AGDT.
+        # ----------------------------------------------------
+
+        for elemento in elementos:
+
+            if elemento["new_rel"] == "conj":
+
+                elemento["new_rel"] = (
+                    f"{funcao_base}_CO"
+                )
+
+                elemento["new_head"] = (
+                    coord_id
+                )
 
 # ============================================================
 # COORDENAÇÃO MÚLTIPLA / CASOS COM VÍRGULAS
