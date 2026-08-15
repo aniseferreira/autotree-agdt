@@ -1,6 +1,6 @@
-streamlit>=1.25.0
-trankit==1.1.1
-transformers==4.21.3
-torch>=2.1.0
-protobuf==3.20.3
-pandas>=1.5.0
+streamlit
+pandas
+trankit
+torch>=2.0.0
+transformers>=4.28.0,<4.36.0
+protobuf
