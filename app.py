@@ -4,10 +4,14 @@ import json
 import zipfile
 import urllib.request
 import requests
+import torch
 import streamlit as st
 import pandas as pd
 
-# --- 1. INTERCEPTAÇÃO ESPECÍFICA DO SERVIDOR FORA DO AR (UOregon -> Hugging Face) ---
+# Desativa cálculo de gradientes globalmente para economizar RAM
+torch.set_grad_enabled(False)
+
+# --- 1. REDIRECIONAMENTO DE REDE (UOregon -> Hugging Face) ---
 _original_requests_get = requests.get
 
 def patched_requests_get(url, *args, **kwargs):
@@ -40,32 +44,20 @@ st.set_page_config(
 CACHE_DIR = os.path.join(os.path.dirname(__file__), ".trankit_cache")
 
 def prepare_trankit_environment(treebank_model: str, embedding_type: str = "xlm-roberta-base"):
-    """
-    Prepara a estrutura do Trankit em disco sem carregar modelos pesados na RAM antecipadamente.
-    """
     target_dir = os.path.join(CACHE_DIR, embedding_type)
     os.makedirs(target_dir, exist_ok=True)
     
     extracted_model_dir = os.path.join(target_dir, treebank_model)
     zip_path = os.path.join(target_dir, f"{treebank_model}.zip")
     
-    # Download e extração do zip do modelo
     if not os.path.exists(extracted_model_dir):
         if not os.path.exists(zip_path):
-            st.info(f"Baixando modelo {treebank_model} do Hugging Face...")
             hf_url = f"https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/{embedding_type}/{treebank_model}.zip"
-            
-            with st.spinner("Baixando arquivo do modelo (~350 MB)..."):
-                urllib.request.urlretrieve(hf_url, zip_path)
-            st.success("Download do modelo concluído!")
+            urllib.request.urlretrieve(hf_url, zip_path)
 
-        st.info("Descompactando modelo...")
-        with st.spinner("Extraindo pesos na pasta de cache..."):
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(target_dir)
-        st.success("Modelo descompactado!")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(target_dir)
 
-    # Registra metadados para que o Trankit reconheça o cache local
     version_file = os.path.join(CACHE_DIR, "version.json")
     if not os.path.exists(version_file):
         with open(version_file, "w", encoding="utf-8") as f:
@@ -84,14 +76,13 @@ def prepare_trankit_environment(treebank_model: str, embedding_type: str = "xlm-
     with open(save_info_path, "w", encoding="utf-8") as f:
         json.dump(info, f)
 
-@st.cache_resource(show_spinner="Carregando modelo linguístico Trankit na memória...")
+@st.cache_resource(show_spinner="Carregando modelo na memória (isso pode levar 1 minuto)...")
 def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
     gc.collect()
     embedding_type = "xlm-roberta-base"
     
     prepare_trankit_environment(treebank_model, embedding_type=embedding_type)
     
-    # Instancia a pipeline (o XLM-RoBERTa é baixado e carregado uma só vez)
     pipeline = trankit.Pipeline(
         lang=treebank_model,
         embedding=embedding_type,
@@ -120,37 +111,27 @@ def trankit_to_agdt_dataframe(doc: dict) -> pd.DataFrame:
 # --- 3. EXECUÇÃO DA APLICAÇÃO ---
 
 st.title("🏛️ Anotador AGDT - Treebank de Dependências")
-st.markdown(
-    "Ferramenta de anotação automática para **Grego Antigo** usando o backend "
-    "**Trankit** alinhado ao padrão AGDT/Perseids."
-)
+st.markdown("Anotação automática de Grego Antigo via Trankit.")
 
 st.sidebar.header("Configurações")
 model_choice = st.sidebar.selectbox(
     "Modelo de Treebank Grego:",
-    ["ancient-greek-perseus", "ancient-greek-proiel"],
-    help="O modelo 'ancient-greek-perseus' segue o padrão AGDT/Perseids."
+    ["ancient-greek-perseus", "ancient-greek-proiel"]
 )
 
 default_text = "Μῆνιν ἄειδε θεὰ Πηληϊάδεω Ἀχιλῆος"
-input_text = st.text_area(
-    "Texto em Grego Antigo:",
-    value=default_text,
-    height=150
-)
+input_text = st.text_area("Texto em Grego Antigo:", value=default_text, height=150)
 
 if st.button("Analisar Dependências", type="primary"):
     if input_text.strip():
         try:
             nlp = load_trankit_pipeline(model_choice)
             
-            with st.spinner("Processando morfossintaxe e parse de dependências..."):
+            with st.spinner("Analisando texto..."):
                 doc = nlp(input_text)
                 df_agdt = trankit_to_agdt_dataframe(doc)
             
-            st.success("Análise concluída com sucesso!")
-            
-            st.subheader("Tabela de Anotação (Padrão CoNLL-U / AGDT)")
+            st.success("Concluído!")
             st.dataframe(df_agdt, use_container_width=True)
             
             tsv_data = df_agdt.to_csv(sep="\t", index=False)
@@ -160,13 +141,7 @@ if st.button("Analisar Dependências", type="primary"):
                 file_name=f"{model_choice}_parsed.tsv",
                 mime="text/tab-separated-values"
             )
-
-        except MemoryError:
-            st.error("⚠️ Limite de memória RAM atingido. Tente analisar um fragmento menor.")
         except Exception as e:
-            st.error(f"Ocorreu um erro durante o processamento: {str(e)}")
-            
+            st.error(f"Erro no processamento: {str(e)}")
         finally:
             gc.collect()
-    else:
-        st.warning("Por favor, insira um texto para analisar.")
