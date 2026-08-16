@@ -12,10 +12,10 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🏛️ AutoTree AGDT — UD to Arethusa XML")
+st.title("🏛️ AutoTree AGDT — UD to Arethusa XML / CoNLL-U")
 st.write(
     "Converta texto em Grego Antigo para o formato XML de dependências do **AGDT** "
-    "(compatível com o Arethusa) utilizando o Stanza."
+    "(compatível com o Arethusa) ou exporte em **CoNLL-U** utilizando o Stanza."
 )
 
 # ============================================================
@@ -229,19 +229,16 @@ def aplicar_auxiliares_especiais(words):
 def aplicar_participios_substantivados(words):
     for w in words:
         feats = w.get("feats") or ""
-        # Verifica se é particípio (seja por feats UD ou pela postag/xpos)
         is_part = "VerbForm=Part" in feats or (len(w["xpos"]) > 2 and w["xpos"][2] == "p")
         if not is_part:
             continue
         
-        # Verifica se o particípio tem artigo dependente
         artigos = [
             art for art in words 
             if art["upos"] == "DET" and art["head"] == w["id"] and normalizar(art["lemma"]) in {"ὁ", "ο"}
         ]
         
         if artigos:
-            # Se estiver no nominativo (feats UD ou xpos), assume a função de Sujeito
             is_nom = "Case=Nom" in feats or (len(w["xpos"]) > 7 and w["xpos"][7] == "n")
             if is_nom or w["deprel"] in {"nsubj", "nsubj:pass", "csubj"}:
                 w["new_rel"] = "SBJ"
@@ -252,18 +249,14 @@ def aplicar_participios_substantivados(words):
                 artigo["new_rel"] = "ATR"
                 artigo["new_head"] = w["id"]
 
-
 def aplicar_infinitivo_sujeito(words):
     for infinitivo in list(words):
         feats = infinitivo.get("feats") or ""
-        # Corrigido 'w["xpos"]' para 'infinitivo["xpos"]'
         is_inf = "VerbForm=Inf" in feats or (len(infinitivo["xpos"]) > 2 and infinitivo["xpos"][2] == "n")
         if not is_inf:
             continue
 
-        # Caso 1: Infinitivo na posição inicial da sentença funcionando como PRED/SBJ sem verbo principal
         if infinitivo["head"] == 0 or infinitivo["deprel"] == "root":
-            # Procura um adjetivo/substantivo que funcione como predicativo (ex: ἀγαθόν)
             pred = None
             for w in words:
                 if w["id"] != infinitivo["id"] and w["head"] == infinitivo["id"]:
@@ -271,7 +264,6 @@ def aplicar_infinitivo_sujeito(words):
                         pred = w
                         break
             
-            # Cria o nó artificial elíptico [0] para a cópula omissa
             artificial_id = max(int(w["id"]) for w in words) + 1
             artificial = {
                 "id": artificial_id,
@@ -298,7 +290,6 @@ def aplicar_infinitivo_sujeito(words):
             words.append(artificial)
             break
             
-        # Caso 2: Infinitivo explicitamente marcado como sujeito de oração copular
         elif infinitivo["deprel"] in {"csubj", "csubj:pass"}:
             infinitivo["new_rel"] = "SBJ"
             
@@ -350,35 +341,95 @@ def gerar_agdt_xml(sentences, nome_base="arethusa_agdt"):
     xml_bytes = ET.tostring(root, encoding="utf-8")
     return minidom.parseString(xml_bytes).toprettyxml(indent="  ", encoding="utf-8").decode("utf-8")
 
+def gerar_conllu(doc):
+    lines = []
+    for i, sent in enumerate(doc.sentences, start=1):
+        lines.append(f"# sent_id = {i}")
+        lines.append(f"# text = {sent.text}")
+        for word in sent.words:
+            fields = [
+                str(word.id),
+                word.text or "_",
+                word.lemma or "_",
+                word.upos or "_",
+                word.xpos or "_",
+                word.feats or "_",
+                str(word.head),
+                word.deprel or "_",
+                "_",
+                "_"
+            ]
+            lines.append("\t".join(fields))
+        lines.append("")
+    return "\n".join(lines)
+
 # ============================================================
 # 4. INTERFACE DO USUÁRIO (STREAMLIT)
 # ============================================================
-texto_exemplo = "Μῆνιν ἄειδε θεὰ Πηληϊάδεω Ἀχιλῆος"
-entrada_texto = st.text_area(
-    "Digite ou cole a frase/texto em Grego Antigo:",
-    value=texto_exemplo,
-    height=120
+
+# --- Opção de Entrada de Texto ---
+st.subheader("1. Entrada de Texto")
+modo_entrada = st.radio(
+    "Escolha o método de inserção do texto:",
+    ("Digitar / Colar Texto", "Carregar arquivo TXT"),
+    horizontal=True
 )
 
-if st.button("Converter para AGDT XML", type="primary"):
+entrada_texto = ""
+texto_exemplo = "Μῆνιν ἄειδε θεὰ Πηληϊάδεω Ἀχιλῆος"
+
+if modo_entrada == "Digitar / Colar Texto":
+    entrada_texto = st.text_area(
+        "Digite ou cole o texto em Grego Antigo:",
+        value=texto_exemplo,
+        height=140
+    )
+else:
+    arquivo_carregado = st.file_uploader(
+        "Selecione um arquivo .txt:",
+        type=["txt"]
+    )
+    if arquivo_carregado is not None:
+        entrada_texto = arquivo_carregado.read().decode("utf-8")
+        st.text_area("Pré-visualização do arquivo carregado:", value=entrada_texto, height=140, disabled=True)
+
+# --- Processamento e Exibição das Saídas ---
+if st.button("Processar Texto", type="primary"):
     if not entrada_texto.strip():
-        st.warning("Por favor, insira um texto para conversão.")
+        st.warning("Por favor, insira ou carregue um texto para conversão.")
     else:
-        with st.spinner("Processando anotação sintática..."):
+        with st.spinner("Processando anotação sintática com Stanza..."):
             doc = nlp(entrada_texto)
             sentences_convertidas = [converter_sentenca(sent) for sent in doc.sentences]
+            
+            # Gerando saídas
             xml_str = gerar_agdt_xml(sentences_convertidas)
+            conllu_str = gerar_conllu(doc)
 
-        st.success("Conversão concluída!")
-        
-        # Botão para Download do XML
-        st.download_button(
-            label="💾 Baixar XML Arethusa",
-            data=xml_str,
-            file_name="autotree_agdt.xml",
-            mime="application/xml"
-        )
+        st.success("Processamento concluído com sucesso!")
+        st.subheader("2. Resultados e Exportação")
 
-        # Exibição do resultado
-        st.subheader("Resultado XML (Preview):")
-        st.code(xml_str, language="xml")
+        # Abas para alternar os formatos
+        tab_xml, tab_conllu = st.tabs(["📄 XML Arethusa (AGDT)", "📝 CoNLL-U (UD)"])
+
+        with tab_xml:
+            st.download_button(
+                label="💾 Baixar XML Arethusa",
+                data=xml_str,
+                file_name="autotree_agdt.xml",
+                mime="application/xml",
+                key="btn_xml"
+            )
+            st.markdown("**Preview do XML (Arethusa):**")
+            st.code(xml_str, language="xml")
+
+        with tab_conllu:
+            st.download_button(
+                label="💾 Baixar CoNLL-U",
+                data=conllu_str,
+                file_name="autotree_ud.conllu",
+                mime="text/plain",
+                key="btn_conllu"
+            )
+            st.markdown("**Preview do CoNLL-U:**")
+            st.code(conllu_str, language="plaintext")
