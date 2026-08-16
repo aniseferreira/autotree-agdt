@@ -1,6 +1,3 @@
 streamlit
 pandas
-trankit
-torch>=2.0.0
-transformers>=4.28.0,<4.36.0
-protobuf
+stanza
