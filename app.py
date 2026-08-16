@@ -227,41 +227,80 @@ def aplicar_auxiliares_especiais(words):
         elif text in {"γὰρ", "γαρ", "μὲν", "μεν", "δέ", "δε"} and w["deprel"] == "advmod": w["new_rel"] = "AuxY"
 
 def aplicar_participios_substantivados(words):
-    for participio in words:
-        if participio["upos"] != "VERB" or "VerbForm=Part" not in (participio.get("feats") or ""):
+    for w in words:
+        feats = w.get("feats") or ""
+        # Verifica se é particípio (seja por feats UD ou pela postag/xpos)
+        is_part = "VerbForm=Part" in feats or (len(w["xpos"]) > 2 and w["xpos"][2] == "p")
+        if not is_part:
             continue
-        artigos = [w for w in words if w["upos"] == "DET" and w["head"] == participio["id"] and normalizar(w["lemma"]) in {"ὁ", "ο"}]
-        if not artigos: continue
-        if participio["deprel"] in {"nsubj", "nsubj:pass", "csubj"}: participio["new_rel"] = "SBJ"
-        elif participio["deprel"] in {"obj", "iobj", "obl:arg"}: participio["new_rel"] = "OBJ"
-        for artigo in artigos:
-            artigo["new_rel"] = "ATR"
-            artigo["new_head"] = participio["id"]
+        
+        # Verifica se o particípio tem artigo dependente
+        artigos = [
+            art for art in words 
+            if art["upos"] == "DET" and art["head"] == w["id"] and normalizar(art["lemma"]) in {"ὁ", "ο"}
+        ]
+        
+        if artigos:
+            # Se estiver no nominativo (feats UD ou xpos), assume a função de Sujeito
+            is_nom = "Case=Nom" in feats or (len(w["xpos"]) > 7 and w["xpos"][7] == "n")
+            if is_nom or w["deprel"] in {"nsubj", "nsubj:pass", "csubj"}:
+                w["new_rel"] = "SBJ"
+            elif w["deprel"] in {"obj", "iobj", "obl:arg"}:
+                w["new_rel"] = "OBJ"
+                
+            for artigo in artigos:
+                artigo["new_rel"] = "ATR"
+                artigo["new_head"] = w["id"]
+
 
 def aplicar_infinitivo_sujeito(words):
     for infinitivo in list(words):
-        if infinitivo["upos"] != "VERB" or "VerbForm=Inf" not in (infinitivo.get("feats") or ""):
+        feats = infinitivo.get("feats") or ""
+        is_inf = "VerbForm=Inf" in feats or (len(w["xpos"]) > 2 and infinitivo["xpos"][2] == "n")
+        if not is_inf:
             continue
-        if infinitivo["deprel"] in {"csubj", "csubj:pass"}:
+
+        # Caso 1: Infinitivo na posição inicial da sentença funcionando como PRED/SBJ sem verbo principal
+        if infinitivo["head"] == 0 or infinitivo["deprel"] == "root":
+            # Procura um adjetivo/substantivo que funcione como predicativo (ex: ἀγαθόν)
+            pred = None
+            for w in words:
+                if w["id"] != infinitivo["id"] and w["head"] == infinitivo["id"]:
+                    if w["upos"] in {"ADJ", "NOUN"} or (len(w["xpos"]) > 0 and w["xpos"][0] in {"a", "n"}):
+                        pred = w
+                        break
+            
+            # Cria o nó artificial elíptico [0] para a cópula omissa
+            artificial_id = max(int(w["id"]) for w in words) + 1
+            artificial = {
+                "id": artificial_id,
+                "text": "[0]",
+                "lemma": "_",
+                "upos": "_",
+                "xpos": "_",
+                "feats": "_",
+                "head": 0,
+                "deprel": "root",
+                "new_rel": "PRED",
+                "new_head": 0,
+                "artificial": True,
+                "insertion_id": "0001e",
+            }
+            
             infinitivo["new_rel"] = "SBJ"
-            continue
-        if infinitivo["new_rel"] != "SBJ": continue
-        pred = get_word(words, infinitivo["new_head"])
-        if pred is None or pred["upos"] not in {"ADJ", "NOUN", "PROPN"}: continue
-
-        pred["new_rel"] = "PNOM"
-        artificial_id = max(int(w["id"]) for w in words) + 1
-        artificial = {
-            "id": artificial_id, "text": "[0]", "lemma": "_", "upos": "_", "xpos": "_",
-            "feats": "_", "head": 0, "deprel": "root", "new_rel": "PRED", "new_head": 0,
-            "artificial": True, "insertion_id": "0003e",
-        }
-        infinitivo["new_rel"] = "SBJ"
-        infinitivo["new_head"] = artificial_id
-        pred["new_head"] = artificial_id
-        words.append(artificial)
-        break
-
+            infinitivo["new_head"] = artificial_id
+            
+            if pred:
+                pred["new_rel"] = "PNOM"
+                pred["new_head"] = artificial_id
+                
+            words.append(artificial)
+            break
+            
+        # Caso 2: Infinitivo explicitamente marcado como sujeito de oração copular
+        elif infinitivo["deprel"] in {"csubj", "csubj:pass"}:
+            infinitivo["new_rel"] = "SBJ"
+            
 def converter_sentenca(sent):
     words = construir_words(sent)
     inicializar_agdt(words)
