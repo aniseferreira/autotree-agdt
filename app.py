@@ -1,3 +1,4 @@
+import re
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 import streamlit as st
@@ -29,15 +30,43 @@ def load_stanza_pipeline():
         lang="grc",
         package="perseus",
         processors="tokenize,lemma,pos,depparse",
-        tokenize_no_ssplit=True,
-        verbose=False
+        verbose=False  # Removido tokenize_no_ssplit=True para permitir divisão em sentenças
     )
 
 with st.spinner("Carregando o modelo Stanza (Perseus)..."):
     nlp = load_stanza_pipeline()
 
 # ============================================================
-# 3. REGRAS E CONSTANTES AGDT
+# 3. DIVISÃO E PRÉ-PROCESSAMENTO DE SENTENÇAS
+# ============================================================
+def pre_processar_sentencas(texto):
+    """
+    Garante que quebras de linha ou pontuações finais gregas (. ; · ; ! ?)
+    sejam separadas adequadamente por duas quebras de linha para o Stanza processar
+    cada frase de forma independente.
+    """
+    # Padroniza quebras de linha
+    linhas = [l.strip() for l in texto.splitlines() if l.strip()]
+    texto_limpo = " ".join(linhas)
+    
+    # Divide o texto após pontuações de final de sentença gregas (. ; · ; ! ?)
+    sentencas = re.split(r'([.;;·!?])', texto_limpo)
+    
+    frases_finais = []
+    curr = ""
+    for pedaco in sentencas:
+        curr += pedaco
+        if re.match(r'[.;;·!?]', pedaco):
+            if curr.strip():
+                frases_finais.append(curr.strip())
+            curr = ""
+    if curr.strip():
+        frases_finais.append(curr.strip())
+        
+    return "\n\n".join(frases_finais) if frases_finais else texto
+
+# ============================================================
+# 4. REGRAS E CONSTANTES AGDT
 # ============================================================
 NEGACOES = {"οὐ", "οὐκ", "οὐχ", "οὐχι", "μή"}
 CONJUNCOES_SUBORDINATIVAS = {
@@ -364,7 +393,7 @@ def gerar_conllu(doc):
     return "\n".join(lines)
 
 # ============================================================
-# 4. INTERFACE DO USUÁRIO (STREAMLIT)
+# 5. INTERFACE DO USUÁRIO (STREAMLIT)
 # ============================================================
 
 # --- Opção de Entrada de Texto ---
@@ -376,7 +405,7 @@ modo_entrada = st.radio(
 )
 
 entrada_texto = ""
-texto_exemplo = "Μῆνιν ἄειδε θεὰ Πηληϊάδεω Ἀχιλῆος"
+texto_exemplo = "Μῆνιν ἄειδε θεὰ Πηληϊάδεω Ἀχιλῆος.\nοὐλομένην, ἣ μυρί' Ἀχαιοῖς άλγε' ἔθηκε."
 
 if modo_entrada == "Digitar / Colar Texto":
     entrada_texto = st.text_area(
@@ -399,14 +428,17 @@ if st.button("Processar Texto", type="primary"):
         st.warning("Por favor, insira ou carregue um texto para conversão.")
     else:
         with st.spinner("Processando anotação sintática com Stanza..."):
-            doc = nlp(entrada_texto)
+            # Pré-processa o texto para separar as frases explicitamente
+            texto_formatado = pre_processar_sentencas(entrada_texto)
+            
+            doc = nlp(texto_formatado)
             sentences_convertidas = [converter_sentenca(sent) for sent in doc.sentences]
             
             # Gerando saídas
             xml_str = gerar_agdt_xml(sentences_convertidas)
             conllu_str = gerar_conllu(doc)
 
-        st.success("Processamento concluído com sucesso!")
+        st.success(f"Processamento concluído com sucesso! ({len(doc.sentences)} sentença(s) identificada(s))")
         st.subheader("2. Resultados e Exportação")
 
         # Abas para alternar os formatos
