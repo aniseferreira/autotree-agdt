@@ -1,147 +1,143 @@
 import gc
-import os
-import json
-import zipfile
-import urllib.request
-import requests
-import torch
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
 import streamlit as st
 import pandas as pd
+import stanza
 
-# Desativa cálculo de gradientes globalmente para economizar RAM
-torch.set_grad_enabled(False)
-
-# --- 1. REDIRECIONAMENTO DE REDE (UOregon -> Hugging Face) ---
-_original_requests_get = requests.get
-
-def patched_requests_get(url, *args, **kwargs):
-    if isinstance(url, str) and "nlp.uoregon.edu" in url:
-        if url.endswith(".zip"):
-            filename = os.path.basename(url)
-            url = f"https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/xlm-roberta-base/{filename}"
-        elif "available_langs.json" in url:
-            url = "https://huggingface.co/uonlp/trankit/raw/main/available_langs.json"
-        elif "version.json" in url:
-            url = "https://huggingface.co/uonlp/trankit/raw/main/version.json"
-            
-    return _original_requests_get(url, *args, **kwargs)
-
-requests.get = patched_requests_get
-
-import trankit
-import trankit.utils.tbinfo as tbinfo
-
-tbinfo.URL = "https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/"
-
-# --- 2. CONFIGURAÇÃO STREAMLIT ---
-
+# --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
-    page_title="Anotador AGDT (Trankit)",
+    page_title="Anotador AGDT (XML / Arethusa)",
     page_icon="🏛️",
     layout="wide"
 )
 
-CACHE_DIR = os.path.join(os.path.dirname(__file__), ".trankit_cache")
+MODEL_MAPPING = {
+    "ancient-greek-perseus (Padrão AGDT/Perseids)": "perseus",
+    "ancient-greek-proiel": "proiel"
+}
 
-def prepare_trankit_environment(treebank_model: str, embedding_type: str = "xlm-roberta-base"):
-    target_dir = os.path.join(CACHE_DIR, embedding_type)
-    os.makedirs(target_dir, exist_ok=True)
-    
-    extracted_model_dir = os.path.join(target_dir, treebank_model)
-    zip_path = os.path.join(target_dir, f"{treebank_model}.zip")
-    
-    if not os.path.exists(extracted_model_dir):
-        if not os.path.exists(zip_path):
-            hf_url = f"https://huggingface.co/uonlp/trankit/resolve/main/models/v1.0.0/{embedding_type}/{treebank_model}.zip"
-            urllib.request.urlretrieve(hf_url, zip_path)
-
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(target_dir)
-
-    version_file = os.path.join(CACHE_DIR, "version.json")
-    if not os.path.exists(version_file):
-        with open(version_file, "w", encoding="utf-8") as f:
-            json.dump({"v1.0.0": "available"}, f)
-
-    save_info_path = os.path.join(CACHE_DIR, "downloaded_langs.json")
-    info = {}
-    if os.path.exists(save_info_path):
-        try:
-            with open(save_info_path, "r", encoding="utf-8") as f:
-                info = json.load(f)
-        except Exception:
-            info = {}
-            
-    info[treebank_model] = embedding_type
-    with open(save_info_path, "w", encoding="utf-8") as f:
-        json.dump(info, f)
-
-@st.cache_resource(show_spinner="Carregando modelo na memória (isso pode levar 1 minuto)...")
-def load_trankit_pipeline(treebank_model: str) -> trankit.Pipeline:
-    gc.collect()
-    embedding_type = "xlm-roberta-base"
-    
-    prepare_trankit_environment(treebank_model, embedding_type=embedding_type)
-    
-    pipeline = trankit.Pipeline(
-        lang=treebank_model,
-        embedding=embedding_type,
-        gpu=False,
-        cache_dir=CACHE_DIR
+@st.cache_resource(show_spinner="Baixando e carregando modelo linguístico na memória...")
+def load_stanza_pipeline(package_name: str):
+    stanza.download("grc", package=package_name, verbose=False)
+    nlp = stanza.Pipeline(
+        lang="grc",
+        package=package_name,
+        processors="tokenize,pos,lemma,depparse",
+        verbose=False
     )
-    return pipeline
+    return nlp
 
-def trankit_to_agdt_dataframe(doc: dict) -> pd.DataFrame:
+def stanza_to_agdt_dataframe(doc) -> pd.DataFrame:
     rows = []
-    for sent_idx, sent in enumerate(doc.get("sentences", []), start=1):
-        for token in sent.get("tokens", []):
+    for sent_idx, sentence in enumerate(doc.sentences, start=1):
+        for word in sentence.words:
             rows.append({
                 "sent_id": sent_idx,
-                "id": token.get("id"),
-                "form": token.get("text"),
-                "lemma": token.get("lemma", "_"),
-                "upostag": token.get("upos", "_"),
-                "xpostag": token.get("xpos", "_"),
-                "feats": token.get("feats", "_"),
-                "head": token.get("head", 0),
-                "deprel": token.get("deprel", "_")
+                "id": word.id,
+                "form": word.text,
+                "lemma": word.lemma if word.lemma else "_",
+                "upostag": word.upos if word.upos else "_",
+                "xpostag": word.xpos if word.xpos else "_",  # Tag AGDT de 9 posições
+                "feats": word.feats if word.feats else "_",
+                "head": word.head if word.head is not None else 0,
+                "deprel": word.deprel if word.deprel else "_"
             })
     return pd.DataFrame(rows)
 
-# --- 3. EXECUÇÃO DA APLICAÇÃO ---
+def generate_agdt_xml(df: pd.DataFrame) -> str:
+    """
+    Converte o DataFrame para a estrutura de XML legível pelo Arethusa (Perseids/AGDT Schema).
+    """
+    treebank = ET.Element("treebank", version="1.5", lang="grc", **{"xml:lang": "grc"})
+    
+    grouped = df.groupby("sent_id")
+    for sent_id, group in grouped:
+        sentence = ET.SubElement(treebank, "sentence", id=str(sent_id), document_id="", subdoc="", span="")
+        for _, row in group.iterrows():
+            ET.SubElement(
+                sentence,
+                "word",
+                id=str(row["id"]),
+                form=str(row["form"]),
+                lemma=str(row["lemma"]),
+                postag=str(row["xpostag"]),  # Tag morfossintática do AGDT
+                head=str(row["head"]),
+                relation=str(row["deprel"])
+            )
+            
+    # Formatação com indentação para visualização limpa
+    rough_string = ET.tostring(treebank, encoding="utf-8")
+    reparsed = minidom.parseString(rough_string)
+    return reparsed.toprettyxml(indent="  ")
 
-st.title("🏛️ Anotador AGDT - Treebank de Dependências")
-st.markdown("Anotação automática de Grego Antigo via Trankit.")
+# --- 2. INTERFACE STREAMLIT ---
 
-st.sidebar.header("Configurações")
-model_choice = st.sidebar.selectbox(
-    "Modelo de Treebank Grego:",
-    ["ancient-greek-perseus", "ancient-greek-proiel"]
+st.title("🏛️ Anotador AGDT - Exportador de XML para o Arethusa")
+st.markdown(
+    "Gere anotações sintáticas para **Grego Antigo** compatíveis com o **Arethusa (Perseids)** e **Tündra**."
 )
 
-default_text = "Μῆνιν ἄειδε θεὰ Πηληϊάδεω Ἀχιλῆος"
-input_text = st.text_area("Texto em Grego Antigo:", value=default_text, height=150)
+st.sidebar.header("Configurações")
+selected_label = st.sidebar.selectbox(
+    "Modelo de Treebank Grego:",
+    list(MODEL_MAPPING.keys()),
+    help="O modelo 'perseus' utiliza as tags morfossintáticas originais do AGDT no XPOS."
+)
+package_choice = MODEL_MAPPING[selected_label]
 
-if st.button("Analisar Dependências", type="primary"):
+default_text = "Μῆνιν ἄειδε θεὰ Πηληϊάδεω Ἀχιλῆος"
+input_text = st.text_area(
+    "Texto em Grego Antigo:",
+    value=default_text,
+    height=150
+)
+
+if st.button("Analisar e Gerar XML AGDT", type="primary"):
     if input_text.strip():
         try:
-            nlp = load_trankit_pipeline(model_choice)
+            nlp = load_stanza_pipeline(package_choice)
             
-            with st.spinner("Analisando texto..."):
+            with st.spinner("Processando morfossintaxe e árvore de dependências..."):
                 doc = nlp(input_text)
-                df_agdt = trankit_to_agdt_dataframe(doc)
+                df_agdt = stanza_to_agdt_dataframe(doc)
+                xml_data = generate_agdt_xml(df_agdt)
             
-            st.success("Concluído!")
-            st.dataframe(df_agdt, use_container_width=True)
+            st.success("Análise concluída!")
             
-            tsv_data = df_agdt.to_csv(sep="\t", index=False)
-            st.download_button(
-                label="📥 Baixar Anotações (TSV / CoNLL-U)",
-                data=tsv_data,
-                file_name=f"{model_choice}_parsed.tsv",
-                mime="text/tab-separated-values"
-            )
+            # Exibição de Abas para Tabela e XML
+            tab1, tab2 = st.tabs(["📊 Tabela de Anotação", "📄 Código XML (Arethusa)"])
+            
+            with tab1:
+                st.dataframe(df_agdt, use_container_width=True)
+                
+            with tab2:
+                st.code(xml_data, language="xml")
+            
+            # Botões de Download
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.download_button(
+                    label="🏛️ Baixar XML (Para Arethusa / Perseids)",
+                    data=xml_data,
+                    file_name=f"{package_choice}_arethusa.xml",
+                    mime="application/xml"
+                )
+                
+            with col2:
+                tsv_data = df_agdt.to_csv(sep="\t", index=False)
+                st.download_button(
+                    label="📥 Baixar CoNLL-U / TSV (Para Tündra)",
+                    data=tsv_data,
+                    file_name=f"{package_choice}_parsed.tsv",
+                    mime="text/tab-separated-values"
+                )
+
         except Exception as e:
-            st.error(f"Erro no processamento: {str(e)}")
+            st.error(f"Ocorreu um erro durante o processamento: {str(e)}")
+            
         finally:
             gc.collect()
+    else:
+        st.warning("Por favor, insira um texto para analisar.")
