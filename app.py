@@ -256,7 +256,8 @@ def aplicar_participios_substantivados(words):
 def aplicar_infinitivo_sujeito(words):
     for infinitivo in list(words):
         feats = infinitivo.get("feats") or ""
-        is_inf = "VerbForm=Inf" in feats or (len(w["xpos"]) > 2 and infinitivo["xpos"][2] == "n")
+        # Corrigido 'w["xpos"]' para 'infinitivo["xpos"]'
+        is_inf = "VerbForm=Inf" in feats or (len(infinitivo["xpos"]) > 2 and infinitivo["xpos"][2] == "n")
         if not is_inf:
             continue
 
