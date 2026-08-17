@@ -136,11 +136,9 @@ def extrair_caso(word):
     xpos = word.get("xpos") or ""
     feats = word.get("feats") or ""
     
-    # 1. Busca pela posição do caso no XPOS do AGDT (índice 4)
     if len(xpos) > 4 and xpos[4] in {"n", "g", "d", "a", "v"}:
         return xpos[4]
         
-    # 2. Busca pela propriedade Case nos Feats do Universal Dependencies (UD)
     for feat in feats.split("|"):
         if feat.startswith("Case="):
             case_val = feat.split("=")[1].lower()
@@ -291,30 +289,20 @@ def resolver_predicados_excedentes(words):
             main_pred["new_rel"] = "PRED_CO"
         else:
             p["new_rel"] = "ADV"
-            
+
 def aplicar_copula(words):
     for cop in words:
-        if cop["new_rel"] != "cop" and cop["deprel"] != "cop": 
+        if cop["new_rel"] != "cop": 
             continue
-
+            
         predicative = get_word(words, cop["head"])
         if predicative is None: 
             continue
 
-        # --- CORREÇÃO DE ERRO DO STANZA ---
-        # Se o Stanza apontou a cópula para o artigo (DET), redireciona para o substantivo
-        if predicative["upos"] == "DET":
-            real_head = get_word(words, predicative["head"])
-            if real_head and real_head["upos"] in {"NOUN", "PROPN", "ADJ", "PRON"}:
-                predicative = real_head
-
-        # --- SEÇÃO 1: DESAMBIGUAÇÃO E LIMPEZA DE NOMINATIVOS ---
         case_pred = extrair_caso(predicative)
         nom_candidate = None
-        sbj_word = None
-        pnom_word = None
 
-        # Caso A: Predicativo no genitivo (ex: "τίνος ἡ δίκη;")
+        # --- 1. BUSCA POR PREDICATIVO NOMINATIVO EXPRESSO ---
         if case_pred == "g":
             for w in words:
                 if w["id"] != predicative["id"] and extrair_caso(w) == "n":
@@ -328,41 +316,12 @@ def aplicar_copula(words):
             if nom_candidate:
                 predicative["new_rel"] = "ATR"
                 predicative["new_head"] = nom_candidate["id"]
-                pnom_word = predicative
-                sbj_word = nom_candidate
-            else:
-                pnom_word = predicative
+                predicative = nom_candidate
 
-        # Caso B: Dois nominativos expressos (ex: "ἡ μέθη ἐστὶν αἰτία")
-        else:
-            noms = [w for w in words if extrair_caso(w) == "n" and w["upos"] in {"NOUN", "PROPN", "ADJ", "PRON"}]
-            if len(noms) >= 2:
-                for n in noms:
-                    tem_art = any(art["upos"] == "DET" and (art["head"] == n["id"] or art.get("new_head") == n["id"]) for art in words)
-                    if tem_art and not sbj_word:
-                        sbj_word = n
-                    elif not tem_art and not pnom_word:
-                        pnom_word = n
-
-            # Fallbacks de segurança
-            if not sbj_word and noms:
-                sbj_word = next((n for n in noms if n["id"] != predicative["id"]), noms[0])
-            if not pnom_word:
-                pnom_word = predicative
-
-        # Reseta os papéis antigos para evitar múltiplos SBJ/PNOM do Stanza
-        if sbj_word:
-            sbj_word["new_rel"] = "SBJ"
-            sbj_word["new_head"] = cop["id"]
-        if pnom_word:
-            pnom_word["new_rel"] = "PNOM"
-            pnom_word["new_head"] = cop["id"]
-
-        # --- VARIÁVEIS DE CONTEXTO ORAÇÃO (EVITA NameError) ---
-        cop_old_head = predicative["new_head"] if predicative["new_head"] != cop["id"] else predicative["head"]
+        cop_old_head = predicative["new_head"]
         parent_word = get_word(words, cop_old_head)
 
-        # --- SEÇÃO 2: ORAÇÃO RELATIVA (ATR) ---
+        # --- 2. ORAÇÃO RELATIVA (ATR) ---
         has_relative = any(
             e_pronome_relativo(w) and (w["head"] in {cop["id"], predicative["id"]} or w.get("new_head") in {cop["id"], predicative["id"]})
             for w in words
@@ -380,7 +339,7 @@ def aplicar_copula(words):
             if antecedente:
                 cop_old_head = antecedente["id"]
 
-        # --- SEÇÃO 3: ORAÇÃO SUBORDINADA (ADV / OBJ) ---
+        # --- 3. ORAÇÃO SUBORDINADA (ADV / OBJ) ---
         elif parent_word and parent_word.get("new_rel") == "AuxC":
             conj_text = normalizar(parent_word["text"])
             matrix_verb = get_word(words, parent_word["new_head"])
@@ -389,44 +348,33 @@ def aplicar_copula(words):
             )
             cop_relation = "OBJ" if is_integrante else "ADV"
 
-        # --- SEÇÃO 4: ORAÇÃO PRINCIPAL (PRED / PRED_CO) ---
+        # --- 4. ORAÇÃO PRINCIPAL (PRED / PRED_CO) ---
         else:
             if predicative.get("new_rel") == "PRED_CO" or cop.get("deprel", "").startswith("conj"):
                 cop_relation = "PRED_CO"
             else:
                 cop_relation = "PRED"
-            cop_old_head = 0
 
-        # --- REESTRUTURAÇÃO DOS NÓS E DEPENDENTES ---
+        # --- REESTRUTURAÇÃO DOS NÓS ---
         cop["new_rel"] = cop_relation
         cop["new_head"] = cop_old_head
+        
+        predicative["new_rel"] = "PNOM"
+        predicative["new_head"] = cop["id"]
 
-        # Reatribuição precisa dos dependentes
         for child in words:
-            if child["id"] in {cop["id"], sbj_word["id"] if sbj_word else None, pnom_word["id"] if pnom_word else None}:
+            if child["id"] == predicative["id"]:
                 continue
-
-            # Artigos -> apontam para o Sujeito
-            if child["upos"] == "DET":
-                if sbj_word:
-                    child["new_head"] = sbj_word["id"]
+            
+            if nom_candidate and child["new_head"] == cop["id"] and extrair_caso(child) == "g" and child["new_rel"] not in {"SBJ", "OBJ"}:
                 child["new_rel"] = "ATR"
+                child["new_head"] = predicative["id"]
 
-            # Genitivos dependentes -> apontam para o Predicativo (αἰτία)
-            elif extrair_caso(child) == "g" and pnom_word:
-                child["new_head"] = pnom_word["id"]
-                child["new_rel"] = "ATR"
-
-            # Partículas -> dependem do verbo
-            elif normalizar(child["text"]) in {"γὰρ", "γαρ", "μὲν", "μεν", "δέ", "δε"}:
-                child["new_head"] = cop["id"]
-                child["new_rel"] = "AuxY"
-
-            # Partículas de realce (καὶ) -> dependem do Sujeito
-            elif normalizar(child["text"]) == "καὶ" and child["deprel"] == "advmod":
-                if sbj_word:
-                    child["new_head"] = sbj_word["id"]
-                child["new_rel"] = "AuxZ"
+            if child["new_head"] == predicative["id"] or child["head"] == predicative["id"]:
+                if child["new_rel"] in {"SBJ", "nsubj"} or e_pronome_relativo(child):
+                    child["new_head"] = cop["id"]
+                    if child["new_rel"] == "nsubj":
+                        child["new_rel"] = "SBJ"
 
 def aplicar_auxv(words):
     for w in words:
@@ -559,7 +507,6 @@ def aplicar_regras_infinitivo(words):
 
         infinitivo["new_rel"] = "OBJ"
 
-
 def converter_sentenca(sent):
     words = construir_words(sent)
     inicializar_agdt(words)
@@ -578,7 +525,6 @@ def converter_sentenca(sent):
 
     resolver_predicados_excedentes(words)
 
-    # Reavaliação final de dependências
     for w in words:
         if w["new_head"] is None: 
             w["new_head"] = w["head"]
@@ -587,7 +533,6 @@ def converter_sentenca(sent):
         if w["new_rel"] == "AuxK": 
             w["new_head"] = 0
 
-        # Bloqueio de Infinitivo em PRED
         xpos = w.get("xpos") or ""
         feats = w.get("feats") or ""
         is_inf = "VerbForm=Inf" in feats or (len(xpos) > 2 and xpos[2] == "n")
