@@ -114,7 +114,7 @@ def mapear_relacao_basica(w):
 
     if text in {"ἂν", "ἄν", "αν"} and rel == "advmod": return "AuxY"
     if text in {"γὰρ", "γαρ", "μὲν", "μεν", "δέ", "δε"} and rel == "advmod": return "AuxY"
-    if text == "καί" and rel == "advmod": return "AuxZ"
+    if text == "καὶ" and rel == "advmod": return "AuxZ"
 
     if text in NEGACOES:
         return "AuxC" if rel in {"mark", "sconj"} else "AuxZ"
