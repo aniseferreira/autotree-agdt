@@ -278,14 +278,38 @@ def aplicar_participios_substantivados(words):
                 artigo["new_rel"] = "ATR"
                 artigo["new_head"] = w["id"]
 
-def aplicar_infinitivo_sujeito(words):
+def aplicar_regras_infinitivo(words):
     for infinitivo in list(words):
         feats = infinitivo.get("feats") or ""
-        is_inf = "VerbForm=Inf" in feats or (len(infinitivo["xpos"]) > 2 and infinitivo["xpos"][2] == "n")
+        xpos = infinitivo.get("xpos") or ""
+        
+        # Verifica se o elemento é um infinitivo (via UD feats ou XPOS/postag)
+        is_inf = "VerbForm=Inf" in feats or (len(xpos) > 2 and xpos[2] == "n")
         if not is_inf:
             continue
 
-        if infinitivo["head"] == 0 or infinitivo["deprel"] == "root":
+        head_word = get_word(words, infinitivo["head"])
+        deprel = infinitivo.get("deprel", "")
+
+        # -------------------------------------------------------------
+        # CASO 1: Infinitivo dependente de verbo principal/finito -> OBJ
+        # Exemplo: σημαίνει ἔσεσθαι (σημαίνει = head, ἔσεσθαι = infinitivo)
+        # -------------------------------------------------------------
+        if head_word and head_word["id"] != infinitivo["id"]:
+            head_xpos = head_word.get("xpos") or ""
+            # Se o governador é um verbo finito/pessoal (posição 2 no postag != 'n', 'p')
+            is_head_verb = head_word.get("upos") == "VERB" or (len(head_xpos) > 0 and head_xpos[0] == "v")
+            is_head_finite = is_head_verb and (len(head_xpos) > 2 and head_xpos[2] not in {"n", "p"})
+
+            if is_head_finite or deprel in {"xcomp", "ccomp", "obj"}:
+                infinitivo["new_rel"] = "OBJ"
+                continue
+
+        # -------------------------------------------------------------
+        # CASO 2: Infinitivo em oração copular omissa sem verbo principal
+        # Ex: "ἀγαθὸν εἶναι" (Criar nó elíptico [0] como PRED, infinitivo passa a SBJ)
+        # -------------------------------------------------------------
+        if infinitivo["head"] == 0 or deprel == "root":
             pred = None
             for w in words:
                 if w["id"] != infinitivo["id"] and w["head"] == infinitivo["id"]:
@@ -293,34 +317,48 @@ def aplicar_infinitivo_sujeito(words):
                         pred = w
                         break
             
-            artificial_id = max(int(w["id"]) for w in words) + 1
-            artificial = {
-                "id": artificial_id,
-                "text": "[0]",
-                "lemma": "_",
-                "upos": "_",
-                "xpos": "_",
-                "feats": "_",
-                "head": 0,
-                "deprel": "root",
-                "new_rel": "PRED",
-                "new_head": 0,
-                "artificial": True,
-                "insertion_id": "0001e",
-            }
-            
-            infinitivo["new_rel"] = "SBJ"
-            infinitivo["new_head"] = artificial_id
-            
+            # Se encontrou um predicativo nominal, o nó artificial vira PRED e o infinitivo vira SBJ
             if pred:
+                artificial_id = max(int(w["id"]) for w in words) + 1
+                artificial = {
+                    "id": artificial_id,
+                    "text": "[0]",
+                    "lemma": "_",
+                    "upos": "_",
+                    "xpos": "_",
+                    "feats": "_",
+                    "head": 0,
+                    "deprel": "root",
+                    "new_rel": "PRED",
+                    "new_head": 0,
+                    "artificial": True,
+                    "insertion_id": "0001e",
+                }
+                
+                infinitivo["new_rel"] = "SBJ"
+                infinitivo["new_head"] = artificial_id
                 pred["new_rel"] = "PNOM"
                 pred["new_head"] = artificial_id
-                
-            words.append(artificial)
-            break
-            
-        elif infinitivo["deprel"] in {"csubj", "csubj:pass"}:
+                words.append(artificial)
+                continue
+            else:
+                # Se for root mas sem predicativo claro, vira OBJ padrão
+                infinitivo["new_rel"] = "OBJ"
+                continue
+
+        # -------------------------------------------------------------
+        # CASO 3: Infinitivo marcado como sujeito (csubj/csubj:pass)
+        # -------------------------------------------------------------
+        if deprel in {"csubj", "csubj:pass"}:
             infinitivo["new_rel"] = "SBJ"
+            continue
+
+        # -------------------------------------------------------------
+        # REGRA DE SEGURANÇA ESTRITA:
+        # Infinitivo JAMAIS pode ter relação 'PRED'. Se sobrou PRED, vira OBJ.
+        # -------------------------------------------------------------
+        if infinitivo.get("new_rel") == "PRED":
+            infinitivo["new_rel"] = "OBJ"
             
 def converter_sentenca(sent):
     words = construir_words(sent)
