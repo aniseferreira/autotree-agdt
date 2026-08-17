@@ -364,7 +364,7 @@ def converter_sentenca(sent):
     words = construir_words(sent)
     inicializar_agdt(words)
     aplicar_auxiliares_especiais(words)
-    aplicar_infinitivo_sujeito(words)
+    aplicar_regras_infinitivo(words)
     aplicar_participios_substantivados(words)
     aplicar_auxv(words)
     aplicar_copula(words)
