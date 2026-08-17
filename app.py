@@ -62,9 +62,7 @@ def pre_processar_sentencas(texto):
 # ============================================================
 
 PARTICULAS_OUTE = {
-    # Formas com οὐ-
     "οὔτε", "ουτε", "οὔτ", "ουτ", "οὔθ", "ουθ",
-    # Formas com μή-
     "μήτε", "μητε", "μήτ", "μητ", "μήθ", "μηθ"
 }
 
@@ -516,7 +514,6 @@ def converter_sentenca(sent):
     aplicar_regras_infinitivo(words)
     aplicar_participios_substantivados(words)
     
-    # 1. Trata a estrutura correlativa "nem... nem" (AuxY -> COORD)
     aplicar_oute_correlativo(words)
     
     aplicar_auxv(words)
@@ -527,6 +524,21 @@ def converter_sentenca(sent):
     aplicar_artigos_repetidos(words)
 
     resolver_predicados_excedentes(words)
+
+    for w in words:
+        if w["new_head"] is None: 
+            w["new_head"] = w["head"]
+        if w["new_rel"] is None: 
+            w["new_rel"] = w["deprel"]
+        if w["new_rel"] == "AuxK": 
+            w["new_head"] = 0
+
+        xpos = w.get("xpos") or ""
+        feats = w.get("feats") or ""
+        is_inf = "VerbForm=Inf" in feats or (len(xpos) > 2 and xpos[2] == "n")
+        
+        if is_inf and w["new_rel"] in {"PRED", "PRED_CO"}:
+            w["new_rel"] = "OBJ" if w["new_rel"] == "PRED" else "OBJ_CO"
 
     return {"text": sent.text, "words": words}
 
