@@ -68,12 +68,98 @@ def pre_processar_sentencas(texto):
 # ============================================================
 # 4. REGRAS E CONSTANTES AGDT
 # ============================================================
-NEGACOES = {"οὐ", "οὐκ", "οὐχ", "οὐχι", "μὴ"}
+
+# 1. CONSTANTES DE CONJUNÇÕES
+CONJUNCOES_INTEGRANTES = {"ὅτι", "οτι"}
+
 CONJUNCOES_SUBORDINATIVAS = {
     "ὅτι", "οτι", "διότι", "διοτι", "ὡς", "ως", "ἐπειδή", "επειδη",
     "ἐπεί", "επει", "ἐπειδήπερ", "επειδηπερ", "ἐάν", "εαν", "ἄν", "αν",
-    "εἰ", "ει", "ἐάνπερ", "εανπερ"
+    "εἰ", "ει", "ἐάνπερ", "εανπερ", "ὥσπερ", "ωσπερ", "καθάπερ", "καθαπερ"
 }
+
+# 2. CATÁLOGO DE VERBA DICENDI / SENTIENDI / COGITANDI
+VERBOS_DICENDI = {
+    # Dizer / Declarar
+    "λέγω", "φημί", "εἶπον", "ἀγγέλλω", "φράζω", "δηλόω", "ἀποκρίνομαι", "βοάω", "κηρύσσω",
+    # Pensar / Acreditar / Julgar
+    "νομίζω", "ἡγέομαι", "οἴομαι", "δοκέω", "πιστεύω",
+    # Perceber / Saber / Ouvir
+    "ὁράω", "ἀκούω", "γιγνώσκω", "οἶδα", "πυνθάνομαι", "αἰσθάνομαι", "μανθάνω"
+}
+
+def e_verbo_dicendi(word):
+    if not word:
+        return False
+    lemma = normalizar(word.get("lemma", ""))
+    return lemma in VERBOS_DICENDI
+
+# 3. APLICAÇÃO DE SUBORDINAÇÃO
+def aplicar_auxc(words):
+    for conj in words:
+        if conj["new_rel"] != "AuxC": 
+            continue
+        if normalizar(conj["text"]) in NEGACOES and conj["deprel"] not in {"mark", "sconj"}:
+            continue
+            
+        subordinate = get_word(words, conj["head"])
+        if subordinate is None: 
+            continue
+
+        # Inverte a dependência: AuxC governa o verbo subordinado
+        conj["new_head"] = subordinate["new_head"]
+        subordinate["new_head"] = conj["id"]
+
+        text_conj = normalizar(conj["text"])
+        matrix_verb = get_word(words, conj["new_head"])
+
+        # REGRA DO ὡς COM VERBO DICENDI
+        is_integrante = text_conj in CONJUNCOES_INTEGRANTES or (
+            text_conj in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
+        )
+
+        subordinate["new_rel"] = "OBJ" if is_integrante else "ADV"
+
+# 4. RESOLUÇÃO DE EXCEDENTES E VALIDAÇÃO FINAL DE PREDS
+def resolver_predicados_excedentes(words):
+    for w in words:
+        head_word = get_word(words, w["new_head"])
+        if head_word and head_word.get("new_rel") == "AuxC":
+            if w["new_rel"] in {"PRED", "PRED_CO"}:
+                conj_text = normalizar(head_word["text"])
+                matrix_verb = get_word(words, head_word["new_head"])
+                
+                # REGRA DO ὡς COM VERBO DICENDI
+                is_integrante = conj_text in CONJUNCOES_INTEGRANTES or (
+                    conj_text in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
+                )
+                w["new_rel"] = "OBJ" if is_integrante else "ADV"
+
+    preds = [w for w in words if w["new_rel"] == "PRED"]
+    if len(preds) <= 1:
+        return
+
+    main_pred = next((p for p in preds if p["new_head"] == 0), preds[0])
+
+    for p in preds:
+        if p["id"] == main_pred["id"]:
+            continue
+        deprel = p.get("deprel", "")
+        if deprel.startswith("conj") or any(w["deprel"].startswith("cc") for w in words):
+            p["new_rel"] = "PRED_CO"
+            main_pred["new_rel"] = "PRED_CO"
+        else:
+            p["new_rel"] = "ADV"
+
+def e_verbo_dicendi(word):
+    if not word:
+        return False
+    lemma = normalizar(word.get("lemma", ""))
+    return lemma in VERBOS_DICENDI
+
+
+NEGACOES = {"οὐ", "οὐκ", "οὐχ", "οὐχι", "μὴ"}
+
 PREPOSICOES_GREGAS = {
     "ἀμφί", "ἀμφὶ", "ἀνά", "ἀνὰ", "ἀντί", "ἀντὶ", "ἀπό", "ἀπὸ",
     "διά", "διὰ", "εἰς", "ἐκ", "ἐξ", "ἐν", "ἐπί", "ἐπὶ", "κατά", "κατὰ",
@@ -174,17 +260,59 @@ def aplicar_auxp(words):
 
 def aplicar_auxc(words):
     for conj in words:
-        if conj["new_rel"] != "AuxC": continue
+        if conj["new_rel"] != "AuxC": 
+            continue
         if normalizar(conj["text"]) in NEGACOES and conj["deprel"] not in {"mark", "sconj"}:
             continue
+            
         subordinate = get_word(words, conj["head"])
-        if subordinate is None: continue
-        subordinate_relation = subordinate["new_rel"] or "OBJ"
+        if subordinate is None: 
+            continue
+
+        # Inverte a dependência: Conjunção (AuxC) passa a governar o verbo da oração
         conj["new_head"] = subordinate["new_head"]
         subordinate["new_head"] = conj["id"]
-        if subordinate_relation in {"ADV", "OBJ", "ATR", "SBJ"}:
-            subordinate["new_rel"] = subordinate_relation
 
+        text_conj = normalizar(conj["text"])
+        
+        # Identifica o verbo principal da oração matriz
+        matrix_verb = get_word(words, conj["new_head"])
+
+        # Regra do ὡς integrante (OBJ) vs. ὡς adverbial (ADV)
+        is_integrante = text_conj in CONJUNCOES_INTEGRANTES or (
+            text_conj in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
+        )
+
+        subordinate["new_rel"] = "OBJ" if is_integrante else "ADV"
+
+def resolver_predicados_excedentes(words):
+    for w in words:
+        head_word = get_word(words, w["new_head"])
+        if head_word and head_word.get("new_rel") == "AuxC":
+            if w["new_rel"] in {"PRED", "PRED_CO"}:
+                conj_text = normalizar(head_word["text"])
+                matrix_verb = get_word(words, head_word["new_head"])
+                
+                is_integrante = conj_text in CONJUNCOES_INTEGRANTES or (
+                    conj_text in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
+                )
+                w["new_rel"] = "OBJ" if is_integrante else "ADV"
+
+    preds = [w for w in words if w["new_rel"] == "PRED"]
+    if len(preds) <= 1:
+        return
+
+    main_pred = next((p for p in preds if p["new_head"] == 0), preds[0])
+
+    for p in preds:
+        if p["id"] == main_pred["id"]:
+            continue
+        deprel = p.get("deprel", "")
+        if deprel.startswith("conj") or any(w["deprel"].startswith("cc") for w in words):
+            p["new_rel"] = "PRED_CO"
+            main_pred["new_rel"] = "PRED_CO"
+        else:
+            p["new_rel"] = "ADV"
 def aplicar_copula(words):
     for cop in words:
         if cop["new_rel"] != "cop": continue
