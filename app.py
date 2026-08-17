@@ -24,13 +24,12 @@ st.write(
 # ============================================================
 @st.cache_resource
 def load_stanza_pipeline():
-    # Faz o download do modelo perseus do Stanza apenas uma vez
     stanza.download("grc", package="perseus", verbose=False)
     return stanza.Pipeline(
         lang="grc",
         package="perseus",
         processors="tokenize,lemma,pos,depparse",
-        verbose=False  # Removido tokenize_no_ssplit=True para permitir divisão em sentenças
+        verbose=False
     )
 
 with st.spinner("Carregando o modelo Stanza (Perseus)..."):
@@ -40,16 +39,9 @@ with st.spinner("Carregando o modelo Stanza (Perseus)..."):
 # 3. DIVISÃO E PRÉ-PROCESSAMENTO DE SENTENÇAS
 # ============================================================
 def pre_processar_sentencas(texto):
-    """
-    Garante que quebras de linha ou pontuações finais gregas (. ; · ; ! ?)
-    sejam separadas adequadamente por duas quebras de linha para o Stanza processar
-    cada frase de forma independente.
-    """
-    # Padroniza quebras de linha
     linhas = [l.strip() for l in texto.splitlines() if l.strip()]
     texto_limpo = " ".join(linhas)
     
-    # Divide o texto após pontuações de final de sentença gregas (. ; · ; ! ?)
     sentencas = re.split(r'([.;;·!?])', texto_limpo)
     
     frases_finais = []
@@ -70,9 +62,7 @@ def pre_processar_sentencas(texto):
 # ============================================================
 
 PARTICULAS_OUTE = {
-    # Formas com οὐ-
     "οὔτε", "ουτε", "οὔτ", "ουτ", "οὔθ", "ουθ",
-    # Formas com μή-
     "μήτε", "μητε", "μήτ", "μητ", "μήθ", "μηθ"
 }
 
@@ -94,13 +84,9 @@ def e_pronome_relativo(word):
     lemma = normalizar(word.get("lemma", ""))
     text = normalizar(word.get("text", ""))
     xpos = word.get("xpos", "")
-    
-    # Checa lema/texto ou se a etiqueta XPOS indica pronome relativo (posição 0='p', posição 1='r')
     is_rel_xpos = len(xpos) > 1 and xpos[0] == "p" and xpos[1] == "r"
     return is_rel_xpos or lemma in PRONOMES_RELATIVOS or text in PRONOMES_RELATIVOS
 
-
-# 1. CONSTANTES DE CONJUNÇÕES
 CONJUNCOES_INTEGRANTES = {"ὅτι", "οτι"}
 
 CONJUNCOES_SUBORDINATIVAS = {
@@ -109,102 +95,11 @@ CONJUNCOES_SUBORDINATIVAS = {
     "εἰ", "ει", "ἐάνπερ", "εανπερ", "ὥσπερ", "ωσπερ", "καθάπερ", "καθαπερ"
 }
 
-# 2. CATÁLOGO DE VERBA DICENDI / SENTIENDI / COGITANDI
 VERBOS_DICENDI = {
-    # Dizer / Declarar
     "λέγω", "φημί", "εἶπον", "ἀγγέλλω", "φράζω", "δηλόω", "ἀποκρίνομαι", "βοάω", "κηρύσσω",
-    # Pensar / Acreditar / Julgar
     "νομίζω", "ἡγέομαι", "οἴομαι", "δοκέω", "πιστεύω",
-    # Perceber / Saber / Ouvir
     "ὁράω", "ἀκούω", "γιγνώσκω", "οἶδα", "πυνθάνομαι", "αἰσθάνομαι", "μανθάνω"
 }
-
-def e_verbo_dicendi(word):
-    if not word:
-        return False
-    lemma = normalizar(word.get("lemma", ""))
-    return lemma in VERBOS_DICENDI
-
-# 3. APLICAÇÃO DE SUBORDINAÇÃO
-def aplicar_auxc(words):
-    for conj in words:
-        if conj["new_rel"] != "AuxC": 
-            continue
-        if normalizar(conj["text"]) in NEGACOES and conj["deprel"] not in {"mark", "sconj"}:
-            continue
-            
-        subordinate = get_word(words, conj["head"])
-        if subordinate is None: 
-            continue
-
-        # Inverte a dependência: AuxC governa o verbo subordinado
-        conj["new_head"] = subordinate["new_head"]
-        subordinate["new_head"] = conj["id"]
-
-        text_conj = normalizar(conj["text"])
-        matrix_verb = get_word(words, conj["new_head"])
-
-        # REGRA DO ὡς COM VERBO DICENDI
-        is_integrante = text_conj in CONJUNCOES_INTEGRANTES or (
-            text_conj in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
-        )
-
-        subordinate["new_rel"] = "OBJ" if is_integrante else "ADV"
-
-# 4. RESOLUÇÃO DE EXCEDENTES E VALIDAÇÃO FINAL DE PREDS
-
-def resolver_predicados_excedentes(words):
-    # 1. Trava para orações relativas: Verbo com pronome relativo dependente passa a ser ATR
-    for w in words:
-        if w["new_rel"] in {"PRED", "PRED_CO"}:
-            has_rel_child = any(
-                e_pronome_relativo(child) and child.get("new_head") == w["id"]
-                for child in words
-            )
-            if has_rel_child:
-                w["new_rel"] = "ATR"
-
-    # 2. Varredura de subordinação (AuxC)
-    auxc_ids = {w["id"] for w in words if w.get("new_rel") == "AuxC" or w.get("deprel") in {"mark", "sconj"}}
-    for w in words:
-        if w["new_rel"] in {"PRED", "PRED_CO"}:
-            head_is_auxc = w["new_head"] in auxc_ids or w["head"] in auxc_ids
-            if head_is_auxc:
-                conj_id = w["new_head"] if w["new_head"] in auxc_ids else w["head"]
-                conj_word = get_word(words, conj_id)
-                if conj_word:
-                    conj_text = normalizar(conj_word["text"])
-                    matrix_verb = get_word(words, conj_word["new_head"])
-                    is_integrante = conj_text in CONJUNCOES_INTEGRANTES or (
-                        conj_text in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
-                    )
-                    w["new_rel"] = "OBJ" if is_integrante else "ADV"
-                else:
-                    w["new_rel"] = "ADV"
-
-    # 3. Unicidade de PRED na oração principal
-    preds = [w for w in words if w["new_rel"] == "PRED"]
-    if len(preds) <= 1:
-        return
-
-    main_pred = next((p for p in preds if p["new_head"] == 0), preds[0])
-    for p in preds:
-        if p["id"] == main_pred["id"]:
-            continue
-        deprel = p.get("deprel", "")
-        if deprel.startswith("conj") or any(w["deprel"].startswith("cc") for w in words):
-            p["new_rel"] = "PRED_CO"
-            main_pred["new_rel"] = "PRED_CO"
-        else:
-            p["new_rel"] = "ADV"
-
-
-def e_verbo_dicendi(word):
-    if not word:
-        return False
-    lemma = normalizar(word.get("lemma", ""))
-    return lemma in VERBOS_DICENDI
-
 
 NEGACOES = {"οὐ", "οὐκ", "οὐχ", "οὐχι", "μὴ"}
 
@@ -218,8 +113,42 @@ PONTUACAO_AUXG = {"ʼ", "῾", "'", "’", "“", "”", "‘", "’", '"'}
 PONTUACAO_AUXK = {".", "·", "·", ";", ":", ";"}
 PONTUACAO_AUXX = {","}
 
+# --- FUNÇÕES AUXILIARES DE INSPEÇÃO ---
+
 def normalizar(s):
     return s.lower().strip() if s else ""
+
+def get_word(words, word_id):
+    for w in words:
+        if w["id"] == int(word_id): return w
+    return None
+
+def e_verbo_dicendi(word):
+    if not word:
+        return False
+    lemma = normalizar(word.get("lemma", ""))
+    return lemma in VERBOS_DICENDI
+
+def extrair_caso(word):
+    """Extrai a letra referente ao caso gramatical da palavra (n, g, d, a, v)."""
+    if not word:
+        return None
+    xpos = word.get("xpos") or ""
+    feats = word.get("feats") or ""
+    
+    # 1. Busca pela posição do caso no XPOS do AGDT (índice 4)
+    if len(xpos) > 4 and xpos[4] in {"n", "g", "d", "a", "v"}:
+        return xpos[4]
+        
+    # 2. Busca pela propriedade Case nos Feats do Universal Dependencies (UD)
+    for feat in feats.split("|"):
+        if feat.startswith("Case="):
+            case_val = feat.split("=")[1].lower()
+            return case_val[0] if case_val else None
+            
+    return None
+
+# --- REGRAS DE TRANSFORMAÇÃO ---
 
 def construir_words(sent):
     words = []
@@ -289,11 +218,6 @@ def inicializar_agdt(words):
         w["new_rel"] = mapear_relacao_basica(w)
         w["new_head"] = w["head"]
 
-def get_word(words, word_id):
-    for w in words:
-        if w["id"] == int(word_id): return w
-    return None
-
 def aplicar_auxp(words):
     for prep in words:
         if prep["new_rel"] != "AuxP": continue
@@ -317,16 +241,12 @@ def aplicar_auxc(words):
         if subordinate is None: 
             continue
 
-        # Inverte a dependência: Conjunção (AuxC) passa a governar o verbo da oração
         conj["new_head"] = subordinate["new_head"]
         subordinate["new_head"] = conj["id"]
 
         text_conj = normalizar(conj["text"])
-        
-        # Identifica o verbo principal da oração matriz
         matrix_verb = get_word(words, conj["new_head"])
 
-        # Regra do ὡς integrante (OBJ) vs. ὡς adverbial (ADV)
         is_integrante = text_conj in CONJUNCOES_INTEGRANTES or (
             text_conj in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
         )
@@ -334,16 +254,11 @@ def aplicar_auxc(words):
         subordinate["new_rel"] = "OBJ" if is_integrante else "ADV"
 
 def aplicar_oute_correlativo(words):
-    # Encontra todas as ocorrências de partículas correlativas na sentença
     ocorrencias = [w for w in words if e_particula_oute(w)]
-    
-    # Se houver duas ou mais partículas (ex: οὔτε ... οὔτε)
     if len(ocorrencias) >= 2:
-        # A última partícula atua como a cabeça da coordenação (COORD)
         coord_principal = ocorrencias[-1]
         coord_principal["new_rel"] = "COORD"
 
-        # As partículas anteriores passam a ser AuxY (correlativas dependentes do COORD)
         for auxy in ocorrencias[:-1]:
             auxy["new_rel"] = "AuxY"
             auxy["new_head"] = coord_principal["id"]
@@ -393,7 +308,6 @@ def aplicar_copula(words):
         if case_pred == "g":
             for w in words:
                 if w["id"] != predicative["id"] and extrair_caso(w) == "n":
-                    # Descarta o Sujeito marcado
                     is_sbj = w["new_rel"] == "SBJ" or w["deprel"] == "nsubj" or any(
                         art["new_rel"] == "AuxE" and art["head"] == w["id"] for art in words
                     )
@@ -401,12 +315,10 @@ def aplicar_copula(words):
                         nom_candidate = w
                         break
             
-            # SE EXISTE NOMINATIVO: O nominativo assume PNOM e o genitivo vira seu ATR
             if nom_candidate:
                 predicative["new_rel"] = "ATR"
                 predicative["new_head"] = nom_candidate["id"]
                 predicative = nom_candidate
-            # SE NÃO EXISTE NOMINATIVO: O genitivo PERMANECE como PNOM (Ex: "τίνος ἡ δίκη;")
 
         cop_old_head = predicative["new_head"]
         parent_word = get_word(words, cop_old_head)
@@ -452,17 +364,14 @@ def aplicar_copula(words):
         predicative["new_rel"] = "PNOM"
         predicative["new_head"] = cop["id"]
 
-        # Redireciona os filhos para a cópula / predicativo
         for child in words:
             if child["id"] == predicative["id"]:
                 continue
             
-            # SÓ rebaixa genitivos secundários se HOUVER um predicativo nominativo explícito
             if nom_candidate and child["new_head"] == cop["id"] and extrair_caso(child) == "g" and child["new_rel"] not in {"SBJ", "OBJ"}:
                 child["new_rel"] = "ATR"
                 child["new_head"] = predicative["id"]
 
-            # Redireciona o Sujeito para a Cópula
             if child["new_head"] == predicative["id"] or child["head"] == predicative["id"]:
                 if child["new_rel"] in {"SBJ", "nsubj"} or e_pronome_relativo(child):
                     child["new_head"] = cop["id"]
@@ -553,7 +462,6 @@ def aplicar_regras_infinitivo(words):
         feats = infinitivo.get("feats") or ""
         xpos = infinitivo.get("xpos") or ""
         
-        # Identifica se o elemento é um infinitivo (via UD feats ou XPOS/postag)
         is_inf = "VerbForm=Inf" in feats or (len(xpos) > 2 and xpos[2] == "n")
         if not is_inf:
             continue
@@ -561,10 +469,6 @@ def aplicar_regras_infinitivo(words):
         head_word = get_word(words, infinitivo["head"])
         deprel = infinitivo.get("deprel", "")
 
-        # -------------------------------------------------------------
-        # CASO 1: Infinitivo em oração elíptica (sem verbo principal expresso)
-        # Exemplo: "ἀγαθὸν εἶναι" -> Cria nó elíptico [0] como PRED, infinitivo vira SBJ
-        # -------------------------------------------------------------
         if (infinitivo["head"] == 0 or deprel == "root") and not any(
             w["upos"] == "VERB" and w["id"] != infinitivo["id"] for w in words
         ):
@@ -599,18 +503,10 @@ def aplicar_regras_infinitivo(words):
                 words.append(artificial)
                 continue
 
-        # -------------------------------------------------------------
-        # CASO 2: Infinitivo marcado expressamente como Sujeito
-        # -------------------------------------------------------------
         if deprel in {"csubj", "csubj:pass"}:
             infinitivo["new_rel"] = "SBJ"
             continue
 
-        # -------------------------------------------------------------
-        # CASO 3: REGRA GERAL (Infinitivo Completivo / OBJ)
-        # Qualquer infinitivo dependente de verbo ou que tenha recebido
-        # PRED/root/xcomp/ccomp/obj é mapeado para OBJ.
-        # -------------------------------------------------------------
         infinitivo["new_rel"] = "OBJ"
 
 
@@ -621,7 +517,6 @@ def converter_sentenca(sent):
     aplicar_regras_infinitivo(words)
     aplicar_participios_substantivados(words)
     
-    # 1. Trata a estrutura correlativa "nem... nem" (AuxY -> COORD)
     aplicar_oute_correlativo(words)
     
     aplicar_auxv(words)
@@ -633,8 +528,6 @@ def converter_sentenca(sent):
 
     resolver_predicados_excedentes(words)
 
-    return {"text": sent.text, "words": words}
-
     # Reavaliação final de dependências
     for w in words:
         if w["new_head"] is None: 
@@ -644,8 +537,7 @@ def converter_sentenca(sent):
         if w["new_rel"] == "AuxK": 
             w["new_head"] = 0
 
-        # --- BLOQUEIO ABSOLUTO ---
-        # Garantia gramatical: NENHUM infinitivo pode sair com a relação PRED.
+        # Bloqueio de Infinitivo em PRED
         xpos = w.get("xpos") or ""
         feats = w.get("feats") or ""
         is_inf = "VerbForm=Inf" in feats or (len(xpos) > 2 and xpos[2] == "n")
@@ -709,7 +601,6 @@ def gerar_conllu(doc):
 # 5. INTERFACE DO USUÁRIO (STREAMLIT)
 # ============================================================
 
-# --- Opção de Entrada de Texto ---
 st.subheader("1. Entrada de Texto")
 modo_entrada = st.radio(
     "Escolha o método de inserção do texto:",
@@ -735,26 +626,22 @@ else:
         entrada_texto = arquivo_carregado.read().decode("utf-8")
         st.text_area("Pré-visualização do arquivo carregado:", value=entrada_texto, height=140, disabled=True)
 
-# --- Processamento e Exibição das Saídas ---
 if st.button("Processar Texto", type="primary"):
     if not entrada_texto.strip():
         st.warning("Por favor, insira ou carregue um texto para conversão.")
     else:
         with st.spinner("Processando anotação sintática com Stanza..."):
-            # Pré-processa o texto para separar as frases explicitamente
             texto_formatado = pre_processar_sentencas(entrada_texto)
             
             doc = nlp(texto_formatado)
             sentences_convertidas = [converter_sentenca(sent) for sent in doc.sentences]
             
-            # Gerando saídas
             xml_str = gerar_agdt_xml(sentences_convertidas)
             conllu_str = gerar_conllu(doc)
 
         st.success(f"Processamento concluído com sucesso! ({len(doc.sentences)} sentença(s) identificada(s))")
         st.subheader("2. Resultados e Exportação")
 
-        # Abas para alternar os formatos
         tab_xml, tab_conllu = st.tabs(["📄 XML Arethusa (AGDT)", "📝 CoNLL-U (UD)"])
 
         with tab_xml:
