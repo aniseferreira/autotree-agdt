@@ -294,24 +294,26 @@ def resolver_predicados_excedentes(words):
             
 def aplicar_copula(words):
     for cop in words:
-        if cop["new_rel"] != "cop": 
+        if cop["new_rel"] != "cop" and cop["deprel"] != "cop": 
             continue
             
         predicative = get_word(words, cop["head"])
         if predicative is None: 
             continue
 
-        # --- FILTRO DE SEGURANÇA (CORREÇÃO DE ERRO DO STANZA) ---
+        # --- CORREÇÃO DE ERRO DO STANZA ---
         # Se o Stanza apontou a cópula para o artigo (DET), redireciona para o substantivo
         if predicative["upos"] == "DET":
             real_head = get_word(words, predicative["head"])
             if real_head and real_head["upos"] in {"NOUN", "PROPN", "ADJ", "PRON"}:
                 predicative = real_head
 
-        # --- SEÇÃO 1: BUSCA POR PREDICATIVO NOMINATIVO EXPRESSO OU DESAMBIGUAÇÃO ---
+        # --- SEÇÃO 1: DESAMBIGUAÇÃO E BUSCA POR SBJ / PNOM ---
         case_pred = extrair_caso(predicative)
         nom_candidate = None
-        
+        sbj_word = None
+        pnom_word = None
+
         # Caso A: Predicativo em genitivo (ex: "τίνος ἡ δίκη;")
         if case_pred == "g":
             for w in words:
@@ -326,28 +328,29 @@ def aplicar_copula(words):
             if nom_candidate:
                 predicative["new_rel"] = "ATR"
                 predicative["new_head"] = nom_candidate["id"]
-                predicative = nom_candidate
+                pnom_word = predicative
+                sbj_word = nom_candidate
+            else:
+                pnom_word = predicative
 
         # Caso B: Dois nominativos expressos (ex: "ἡ μέθη ἐστὶν αἰτία")
-        # O termo COM artigo vira SBJ; o termo SEM artigo vira PNOM
         else:
             noms = [w for w in words if extrair_caso(w) == "n" and w["upos"] in {"NOUN", "PROPN", "ADJ", "PRON"}]
             if len(noms) >= 2:
-                com_artigo = None
-                sem_artigo = None
                 for n in noms:
                     tem_art = any(art["upos"] == "DET" and art["head"] == n["id"] for art in words)
-                    if tem_art and not com_artigo:
-                        com_artigo = n
-                    elif not tem_art and not sem_artigo:
-                        sem_artigo = n
-                
-                if com_artigo and sem_artigo:
-                    com_artigo["new_rel"] = "SBJ"
-                    com_artigo["new_head"] = cop["id"]
-                    predicative = sem_artigo
+                    if tem_art and not sbj_word:
+                        sbj_word = n
+                    elif not tem_art and not pnom_word:
+                        pnom_word = n
 
-        cop_old_head = predicative["new_head"]
+            # Fallbacks para manter a integridade caso a regra do artigo não isole ambos
+            if not sbj_word and noms:
+                sbj_word = next((n for n in noms if n["id"] != predicative["id"]), noms[0])
+            if not pnom_word:
+                pnom_word = predicative
+
+        cop_old_head = predicative["new_head"] if predicative["new_head"] != cop["id"] else predicative["head"]
         parent_word = get_word(words, cop_old_head)
 
         # --- SEÇÃO 2: ORAÇÃO RELATIVA (ATR) ---
@@ -383,35 +386,47 @@ def aplicar_copula(words):
                 cop_relation = "PRED_CO"
             else:
                 cop_relation = "PRED"
+            cop_old_head = 0
 
-        # --- REESTRUTURAÇÃO FINAL DOS NÓS NA ÁRVORE ---
+        # --- REESTRUTURAÇÃO DOS NÓS E ADAPTADORES ---
         cop["new_rel"] = cop_relation
         cop["new_head"] = cop_old_head
-        
-        predicative["new_rel"] = "PNOM"
-        predicative["new_head"] = cop["id"]
 
+        if sbj_word:
+            sbj_word["new_rel"] = "SBJ"
+            sbj_word["new_head"] = cop["id"]
+
+        if pnom_word:
+            pnom_word["new_rel"] = "PNOM"
+            pnom_word["new_head"] = cop["id"]
+
+        # Ajuste fino de dependentes (artigos, genitivos e partículas da oração)
         for child in words:
-            if child["id"] == predicative["id"]:
+            if child["id"] in {cop["id"], sbj_word["id"] if sbj_word else None, pnom_word["id"] if pnom_word else None}:
                 continue
-            
-            # Rebaixa genitivos secundários se houver um predicativo nominativo explícito
-            if nom_candidate and child["new_head"] == cop["id"] and extrair_caso(child) == "g" and child["new_rel"] not in {"SBJ", "OBJ"}:
+
+            # Artigos
+            if child["upos"] == "DET":
+                head_det = get_word(words, child["head"])
+                if head_det and head_det["id"] in {sbj_word["id"] if sbj_word else None, pnom_word["id"] if pnom_word else None}:
+                    child["new_head"] = head_det["id"]
+                elif sbj_word:
+                    child["new_head"] = sbj_word["id"]
                 child["new_rel"] = "ATR"
-                child["new_head"] = predicative["id"]
 
-            # Redireciona o Sujeito (ou pronomes relativos) do predicativo para a Cópula
-            if child["new_head"] == predicative["id"] or child["head"] == predicative["id"]:
-                if child["new_rel"] in {"SBJ", "nsubj"} or e_pronome_relativo(child):
-                    child["new_head"] = cop["id"]
-                    if child["new_rel"] == "nsubj":
-                        child["new_rel"] = "SBJ"
+            # Genitivos dependentes (ex: τούτων -> αἰτία)
+            elif extrair_caso(child) == "g" and pnom_word:
+                child["new_head"] = pnom_word["id"]
+                child["new_rel"] = "ATR"
 
-            # Garante que genitivos como τούτων se liguem ao PNOM (αἰτία)
-            if extrair_caso(child) == "g" and child["id"] != cop["id"]:
-                if child["head"] in {predicative["id"], cop["id"]}:
-                    child["new_head"] = predicative["id"]
-                    child["new_rel"] = "ATR"
+            # Partículas
+            elif normalizar(child["text"]) in {"γὰρ", "γαρ", "μὲν", "μεν", "δέ", "δε"}:
+                child["new_head"] = cop["id"]
+                child["new_rel"] = "AuxY"
+            elif normalizar(child["text"]) == "καὶ" and child["deprel"] == "advmod":
+                if sbj_word:
+                    child["new_head"] = sbj_word["id"]
+                child["new_rel"] = "AuxZ"
 
 def aplicar_auxv(words):
     for w in words:
