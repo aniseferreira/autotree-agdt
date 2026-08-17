@@ -460,13 +460,15 @@ def aplicar_regras_infinitivo(words):
         feats = infinitivo.get("feats") or ""
         xpos = infinitivo.get("xpos") or ""
         
-        is_inf = "VerbForm=Inf" in feats or (len(xpos) > 2 and xpos[2] == "n")
+        # Correção: O modo no XPOS do AGDT/Perseus (ex: v--pne---) fica no índice 4
+        is_inf = "VerbForm=Inf" in feats or (len(xpos) > 4 and xpos[4] == "n")
         if not is_inf:
             continue
 
         head_word = get_word(words, infinitivo["head"])
         deprel = infinitivo.get("deprel", "")
 
+        # 1. ELIPSE VERBAL COM NÓ ARTIFICIAL [0]
         if (infinitivo["head"] == 0 or deprel == "root") and not any(
             w["upos"] == "VERB" and w["id"] != infinitivo["id"] for w in words
         ):
@@ -499,12 +501,19 @@ def aplicar_regras_infinitivo(words):
                 pred["new_rel"] = "PNOM"
                 pred["new_head"] = artificial_id
                 words.append(artificial)
+
+                # Ajusta os dependentes do predicativo (ex: dativo de referência "οὐδενὶ")
+                for child in words:
+                    if child["head"] == pred["id"] and extrair_caso(child) == "d":
+                        child["new_rel"] = "OBJ"
                 continue
 
+        # 2. INFINITIVO SUJEITO DE VERBO IMPESSOAL
         if deprel in {"csubj", "csubj:pass"}:
             infinitivo["new_rel"] = "SBJ"
             continue
 
+        # 3. INFINITIVO OBJETO / COMPLETIVO
         infinitivo["new_rel"] = "OBJ"
 
 def converter_sentenca(sent):
