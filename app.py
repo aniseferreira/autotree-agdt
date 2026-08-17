@@ -332,18 +332,46 @@ def resolver_predicados_excedentes(words):
             main_pred["new_rel"] = "PRED_CO"
         else:
             p["new_rel"] = "ADV"
+            
 def aplicar_copula(words):
     for cop in words:
-        if cop["new_rel"] != "cop": continue
+        if cop["new_rel"] != "cop": 
+            continue
+            
         predicative = get_word(words, cop["head"])
-        if predicative is None: continue
+        if predicative is None: 
+            continue
+
         cop_old_head = predicative["new_head"]
-        cop["new_rel"] = "PRED"
+        parent_word = get_word(words, cop_old_head)
+        
+        # 1. Determina a relação correta da cópula com base no contexto do governador
+        if parent_word and parent_word.get("new_rel") == "AuxC":
+            conj_text = normalizar(parent_word["text"])
+            matrix_verb = get_word(words, parent_word["new_head"])
+            
+            is_integrante = conj_text in CONJUNCOES_INTEGRANTES or (
+                conj_text in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
+            )
+            cop_relation = "OBJ" if is_integrante else "ADV"
+        else:
+            # Se a oração for coordenada, herda PRED_CO; caso contrário, PRED
+            if predicative.get("new_rel") == "PRED_CO" or cop.get("deprel", "").startswith("conj"):
+                cop_relation = "PRED_CO"
+            else:
+                cop_relation = "PRED"
+
+        # 2. Reorganiza a hierarquia da árvore (Cópula vira o centro; Predicativo vira PNOM)
+        cop["new_rel"] = cop_relation
         cop["new_head"] = cop_old_head
+        
         predicative["new_rel"] = "PNOM"
         predicative["new_head"] = cop["id"]
+
+        # 3. Reorienta o Sujeito (SBJ) para ser dependente da Cópula
         for child in words:
-            if child["new_head"] == predicative["id"] and child["new_rel"] == "SBJ":
+            if child["new_head"] == predicative["id"] and child["new_rel"] in {"SBJ", "nsubj"}:
+                child["new_rel"] = "SBJ"
                 child["new_head"] = cop["id"]
 
 def aplicar_auxv(words):
