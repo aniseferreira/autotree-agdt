@@ -69,6 +69,20 @@ def pre_processar_sentencas(texto):
 # 4. REGRAS E CONSTANTES AGDT
 # ============================================================
 
+PARTICULAS_OUTE = {
+    # Formas com οὐ-
+    "οὔτε", "ουτε", "οὔτ", "ουτ", "οὔθ", "ουθ",
+    # Formas com μή-
+    "μήτε", "μητε", "μήτ", "μητ", "μήθ", "μηθ"
+}
+
+def e_particula_oute(word):
+    if not word:
+        return False
+    text = normalizar(word.get("text", "")).strip("’'")
+    lemma = normalizar(word.get("lemma", "")).strip("’'")
+    return text in PARTICULAS_OUTE or lemma in PARTICULAS_OUTE
+
 PRONOMES_RELATIVOS = {
     "ὅς", "ἥ", "ὅ", "ὅσπερ", "ἥπερ", "ὅπερ", "ὅστις", "ἥτις", "ὅτι",
     "οὗ", "ἧς", "ᾧ", "ᾗ", "ὅν", "ἥν", "ὧν", "οἷς", "αἷς", "ούς", "ἅς", "ἅ"
@@ -319,6 +333,21 @@ def aplicar_auxc(words):
 
         subordinate["new_rel"] = "OBJ" if is_integrante else "ADV"
 
+def aplicar_oute_correlativo(words):
+    # Encontra todas as ocorrências de partículas correlativas na sentença
+    ocorrencias = [w for w in words if e_particula_oute(w)]
+    
+    # Se houver duas ou mais partículas (ex: οὔτε ... οὔτε)
+    if len(ocorrencias) >= 2:
+        # A última partícula atua como a cabeça da coordenação (COORD)
+        coord_principal = ocorrencias[-1]
+        coord_principal["new_rel"] = "COORD"
+
+        # As partículas anteriores passam a ser AuxY (correlativas dependentes do COORD)
+        for auxy in ocorrencias[:-1]:
+            auxy["new_rel"] = "AuxY"
+            auxy["new_head"] = coord_principal["id"]
+
 def resolver_predicados_excedentes(words):
     for w in words:
         head_word = get_word(words, w["new_head"])
@@ -564,16 +593,22 @@ def converter_sentenca(sent):
     words = construir_words(sent)
     inicializar_agdt(words)
     aplicar_auxiliares_especiais(words)
-    
-    # Aplica as regras sintáticas
     aplicar_regras_infinitivo(words)
     aplicar_participios_substantivados(words)
+    
+    # 1. Trata a estrutura correlativa "nem... nem" (AuxY -> COORD)
+    aplicar_oute_correlativo(words)
+    
     aplicar_auxv(words)
-    aplicar_copula(words)
     aplicar_auxc(words)
+    aplicar_copula(words)
     aplicar_coordenacao(words)
     aplicar_auxp(words)
     aplicar_artigos_repetidos(words)
+
+    resolver_predicados_excedentes(words)
+
+    return {"text": sent.text, "words": words}
 
     # Reavaliação final de dependências
     for w in words:
