@@ -386,11 +386,32 @@ def aplicar_copula(words):
         if predicative is None: 
             continue
 
+        case_pred = extrair_caso(predicative)
+        nom_candidate = None
+        
+        # --- 1. BUSCA POR PREDICATIVO NOMINATIVO EXPRESSO ---
+        if case_pred == "g":
+            for w in words:
+                if w["id"] != predicative["id"] and extrair_caso(w) == "n":
+                    # Descarta o Sujeito marcado
+                    is_sbj = w["new_rel"] == "SBJ" or w["deprel"] == "nsubj" or any(
+                        art["new_rel"] == "AuxE" and art["head"] == w["id"] for art in words
+                    )
+                    if not is_sbj:
+                        nom_candidate = w
+                        break
+            
+            # SE EXISTE NOMINATIVO: O nominativo assume PNOM e o genitivo vira seu ATR
+            if nom_candidate:
+                predicative["new_rel"] = "ATR"
+                predicative["new_head"] = nom_candidate["id"]
+                predicative = nom_candidate
+            # SE NÃO EXISTE NOMINATIVO: O genitivo PERMANECE como PNOM (Ex: "τίνος ἡ δίκη;")
+
         cop_old_head = predicative["new_head"]
         parent_word = get_word(words, cop_old_head)
-        
-        # --- 1. CHECAGEM DE ORAÇÃO RELATIVA (ATR) ---
-        # Verifica se há algum pronome relativo associado a esta oração (dependente da cópula ou do predicativo)
+
+        # --- 2. ORAÇÃO RELATIVA (ATR) ---
         has_relative = any(
             e_pronome_relativo(w) and (w["head"] in {cop["id"], predicative["id"]} or w.get("new_head") in {cop["id"], predicative["id"]})
             for w in words
@@ -398,46 +419,50 @@ def aplicar_copula(words):
 
         if has_relative:
             cop_relation = "ATR"
-            
-            # Tenta localizar o antecedente nominal (ex: substantivo/adjetivo anterior ao pronome relativo)
             antecedente = None
             rel_word = next((w for w in words if e_pronome_relativo(w)), None)
             if rel_word:
-                # Procura o substantivo/adjetivo mais próximo que venha antes do relativo
                 for w in sorted(words, key=lambda x: int(x["id"]), reverse=True):
                     if int(w["id"]) < int(rel_word["id"]) and w["upos"] in {"NOUN", "PROPN", "ADJ"}:
                         antecedente = w
                         break
-            
             if antecedente:
                 cop_old_head = antecedente["id"]
 
-        # --- 2. CHECAGEM DE ORAÇÃO SUBORDINADA (AUX C -> ADV / OBJ) ---
+        # --- 3. ORAÇÃO SUBORDINADA (ADV / OBJ) ---
         elif parent_word and parent_word.get("new_rel") == "AuxC":
             conj_text = normalizar(parent_word["text"])
             matrix_verb = get_word(words, parent_word["new_head"])
-            
             is_integrante = conj_text in CONJUNCOES_INTEGRANTES or (
                 conj_text in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
             )
             cop_relation = "OBJ" if is_integrante else "ADV"
 
-        # --- 3. ORAÇÃO PRINCIPAL (PRED / PRED_CO) ---
+        # --- 4. ORAÇÃO PRINCIPAL (PRED / PRED_CO) ---
         else:
             if predicative.get("new_rel") == "PRED_CO" or cop.get("deprel", "").startswith("conj"):
                 cop_relation = "PRED_CO"
             else:
                 cop_relation = "PRED"
 
-        # --- REESTRUTURAÇÃO DOS NÓS DA CÓPULA ---
+        # --- REESTRUTURAÇÃO DOS NÓS ---
         cop["new_rel"] = cop_relation
         cop["new_head"] = cop_old_head
         
         predicative["new_rel"] = "PNOM"
         predicative["new_head"] = cop["id"]
 
-        # Redireciona Sujeito e Relativo para dependerem diretamente da Cópula
+        # Redireciona os filhos para a cópula / predicativo
         for child in words:
+            if child["id"] == predicative["id"]:
+                continue
+            
+            # SÓ rebaixa genitivos secundários se HOUVER um predicativo nominativo explícito
+            if nom_candidate and child["new_head"] == cop["id"] and extrair_caso(child) == "g" and child["new_rel"] not in {"SBJ", "OBJ"}:
+                child["new_rel"] = "ATR"
+                child["new_head"] = predicative["id"]
+
+            # Redireciona o Sujeito para a Cópula
             if child["new_head"] == predicative["id"] or child["head"] == predicative["id"]:
                 if child["new_rel"] in {"SBJ", "nsubj"} or e_pronome_relativo(child):
                     child["new_head"] = cop["id"]
