@@ -296,62 +296,72 @@ def aplicar_copula(words):
     for cop in words:
         if cop["new_rel"] != "cop" and cop["deprel"] != "cop": 
             continue
-            
-        predicative = get_word(words, cop["head"])
-        if predicative is None: 
-            continue
 
-        # --- CORREÇÃO DE ERRO DO STANZA ---
-        # Se o Stanza apontou a cópula para o artigo (DET), redireciona para o substantivo
-        if predicative["upos"] == "DET":
-            real_head = get_word(words, predicative["head"])
-            if real_head and real_head["upos"] in {"NOUN", "PROPN", "ADJ", "PRON"}:
-                predicative = real_head
+        # 1. A cópula sempre assume como PRED principal da oração
+        cop["new_rel"] = "PRED"
+        cop["new_head"] = 0
 
-        # --- SEÇÃO 1: DESAMBIGUAÇÃO E BUSCA POR SBJ / PNOM ---
-        case_pred = extrair_caso(predicative)
-        nom_candidate = None
+        # 2. Coleta TODOS os nominativos da sentença para desambiguação
+        noms = [w for w in words if extrair_caso(w) == "n" and w["upos"] in {"NOUN", "PROPN", "ADJ", "PRON"}]
+        
         sbj_word = None
         pnom_word = None
 
-        # Caso A: Predicativo em genitivo (ex: "τίνος ἡ δίκη;")
-        if case_pred == "g":
-            for w in words:
-                if w["id"] != predicative["id"] and extrair_caso(w) == "n":
-                    is_sbj = w["new_rel"] == "SBJ" or w["deprel"] == "nsubj" or any(
-                        art["new_rel"] == "AuxE" and art["head"] == w["id"] for art in words
-                    )
-                    if not is_sbj:
-                        nom_candidate = w
-                        break
-            
-            if nom_candidate:
-                predicative["new_rel"] = "ATR"
-                predicative["new_head"] = nom_candidate["id"]
-                pnom_word = predicative
-                sbj_word = nom_candidate
-            else:
-                pnom_word = predicative
+        # Regra de Ouro do Grego: Termo com Artigo = Sujeito; Termo sem Artigo = Predicativo
+        for n in noms:
+            tem_artigo = any(
+                art["upos"] == "DET" and (art["head"] == n["id"] or art.get("new_head") == n["id"])
+                for art in words
+            )
+            if tem_artigo and not sbj_word:
+                sbj_word = n
+            elif not tem_artigo and not pnom_word:
+                pnom_word = n
 
-        # Caso B: Dois nominativos expressos (ex: "ἡ μέθη ἐστὶν αἰτία")
-        else:
-            noms = [w for w in words if extrair_caso(w) == "n" and w["upos"] in {"NOUN", "PROPN", "ADJ", "PRON"}]
-            if len(noms) >= 2:
-                for n in noms:
-                    tem_art = any(art["upos"] == "DET" and art["head"] == n["id"] for art in words)
-                    if tem_art and not sbj_word:
-                        sbj_word = n
-                    elif not tem_art and not pnom_word:
-                        pnom_word = n
+        # Fallbacks de segurança
+        if not sbj_word and noms:
+            sbj_word = noms[0]
+        if not pnom_word and len(noms) > 1:
+            pnom_word = next((n for n in noms if n["id"] != sbj_word["id"]), None)
 
-            # Fallbacks para manter a integridade caso a regra do artigo não isole ambos
-            if not sbj_word and noms:
-                sbj_word = next((n for n in noms if n["id"] != predicative["id"]), noms[0])
-            if not pnom_word:
-                pnom_word = predicative
+        # 3. LIMPEZA TOTAL E ATRIBUIÇÃO ÚNICA (Impede acúmulo de SBJ/PNOM)
+        # Primeiro reseta a relação de todos os nominativos para não haver resíduos
+        for n in noms:
+            n["new_rel"] = None
+            n["new_head"] = cop["id"]
 
-        cop_old_head = predicative["new_head"] if predicative["new_head"] != cop["id"] else predicative["head"]
-        parent_word = get_word(words, cop_old_head)
+        if sbj_word:
+            sbj_word["new_rel"] = "SBJ"
+            sbj_word["new_head"] = cop["id"]
+
+        if pnom_word:
+            pnom_word["new_rel"] = "PNOM"
+            pnom_word["new_head"] = cop["id"]
+
+        # 4. FIXAÇÃO DOS DEPENDENTES (Sem brecha para o Stanza palpitar)
+        for w in words:
+            if w["id"] in {cop["id"], sbj_word["id"] if sbj_word else None, pnom_word["id"] if pnom_word else None}:
+                continue
+
+            # Artigo (ἡ) -> É ATR exclusivo do Sujeito (μέθη)
+            if w["upos"] == "DET":
+                w["new_head"] = sbj_word["id"] if sbj_word else cop["id"]
+                w["new_rel"] = "ATR"
+
+            # Genitivo (τούτων) -> É ATR exclusivo do Predicativo (αἰτία)
+            elif extrair_caso(w) == "g":
+                w["new_head"] = pnom_word["id"] if pnom_word else cop["id"]
+                w["new_rel"] = "ATR"
+
+            # Partícula (γὰρ) -> AuxY dependente do verbo
+            elif normalizar(w["text"]) in {"γὰρ", "γαρ", "μὲν", "μεν", "δέ", "δε"}:
+                w["new_head"] = cop["id"]
+                w["new_rel"] = "AuxY"
+
+            # Advérbio/Conjunção de realce (καὶ) -> AuxZ dependente do Sujeito
+            elif normalizar(w["text"]) == "καὶ" and w["deprel"] == "advmod":
+                w["new_head"] = sbj_word["id"] if sbj_word else cop["id"]
+                w["new_rel"] = "AuxZ"
 
         # --- SEÇÃO 2: ORAÇÃO RELATIVA (ATR) ---
         has_relative = any(
