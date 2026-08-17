@@ -122,33 +122,52 @@ def aplicar_auxc(words):
 
 # 4. RESOLUÇÃO DE EXCEDENTES E VALIDAÇÃO FINAL DE PREDS
 def resolver_predicados_excedentes(words):
+    # Mapas rápidos de consulta
+    auxc_ids = {w["id"] for w in words if w.get("new_rel") == "AuxC" or w.get("deprel") in {"mark", "sconj"}}
+    
+    # 1. VARREDURA ESTRITA DE SUBORDINAÇÃO:
+    # Nenhum verbo/palavra associado diretamente ou inversamente a uma AuxC pode ser PRED
     for w in words:
-        head_word = get_word(words, w["new_head"])
-        if head_word and head_word.get("new_rel") == "AuxC":
-            if w["new_rel"] in {"PRED", "PRED_CO"}:
-                conj_text = normalizar(head_word["text"])
-                matrix_verb = get_word(words, head_word["new_head"])
+        if w["new_rel"] in {"PRED", "PRED_CO"}:
+            # Checa se o chefe é AuxC OU se ele é chefe de uma AuxC (dependência invertida/quebrada)
+            head_is_auxc = w["new_head"] in auxc_ids or w["head"] in auxc_ids
+            is_head_of_auxc = any(aux["head"] == w["id"] for aux in words if aux["id"] in auxc_ids)
+            
+            if head_is_auxc or is_head_of_auxc:
+                # Localiza a conjunção para determinar a regra do ὡς / integrantes
+                conj_id = w["new_head"] if w["new_head"] in auxc_ids else w["head"]
+                conj_word = get_word(words, conj_id)
                 
-                # REGRA DO ὡς COM VERBO DICENDI
-                is_integrante = conj_text in CONJUNCOES_INTEGRANTES or (
-                    conj_text in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
-                )
-                w["new_rel"] = "OBJ" if is_integrante else "ADV"
+                if conj_word:
+                    conj_text = normalizar(conj_word["text"])
+                    matrix_verb = get_word(words, conj_word["new_head"])
+                    
+                    is_integrante = conj_text in CONJUNCOES_INTEGRANTES or (
+                        conj_text in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
+                    )
+                    w["new_rel"] = "OBJ" if is_integrante else "ADV"
+                else:
+                    w["new_rel"] = "ADV"
 
+    # 2. UNICIDADE DE PRED NA ORAÇÃO PRINCIPAL
     preds = [w for w in words if w["new_rel"] == "PRED"]
     if len(preds) <= 1:
         return
 
+    # O PRED principal deve ser o que tem a raiz (head=0) ou o de menor ID que esteja na oração mãe
     main_pred = next((p for p in preds if p["new_head"] == 0), preds[0])
 
     for p in preds:
         if p["id"] == main_pred["id"]:
             continue
+        
         deprel = p.get("deprel", "")
+        # Se houver coordenação na oração
         if deprel.startswith("conj") or any(w["deprel"].startswith("cc") for w in words):
             p["new_rel"] = "PRED_CO"
             main_pred["new_rel"] = "PRED_CO"
         else:
+            # Qualquer PRED sobressalente vira ADV
             p["new_rel"] = "ADV"
 
 def e_verbo_dicendi(word):
