@@ -547,6 +547,22 @@ def aplicar_regras_infinitivo(words):
         # 3. INFINITIVO OBJETO / COMPLETIVO
         infinitivo["new_rel"] = "OBJ"
         
+def resolver_sujeito_passivo_neutro(words):
+    """Garante que pronomes/substantivos neutros ligados a verbos passivos sejam SBJ, não OBJ."""
+    for w in words:
+        xpos = w.get("xpos") or ""
+        # Verifica se é verbo na voz passiva (ex: ἐσταφυλοτομήθη -> v3saip---, posição 2 é 'p')
+        is_passive = w["upos"] in {"VERB", "AUX"} and len(xpos) > 2 and xpos[2] == "p"
+        
+        if is_passive:
+            for child in words:
+                if child["head"] == w["id"] or child.get("new_head") == w["id"]:
+                    # Se for neutro em caso ambíguo (a/n) e estiver como OBJ, vira SBJ
+                    caso = extrair_caso(child)
+                    if caso in {"a", "n"} and child["new_rel"] in {"OBJ", "ATR"}:
+                        if child["upos"] in {"PRON", "NOUN", "ADJ", "DET"}:
+                            child["new_rel"] = "SBJ"
+
 def converter_sentenca(sent):
     words = construir_words(sent)
     inicializar_agdt(words)
@@ -560,11 +576,11 @@ def converter_sentenca(sent):
     aplicar_auxc(words)
     aplicar_copula(words)
     aplicar_coordenacao(words)
-    tratar_oracoes_relativas_substantivas(words) # Regra aplicada após reestruturação de heads
     aplicar_auxp(words)
     aplicar_artigos_repetidos(words)
 
     resolver_predicados_excedentes(words)
+    resolver_sujeito_passivo_neutro(words) # Promove 'αὐτὸ' a SBJ do verbo passivo
 
     for w in words:
         if w["new_head"] is None: 
@@ -573,6 +589,15 @@ def converter_sentenca(sent):
             w["new_rel"] = w["deprel"]
         if w["new_rel"] == "AuxK": 
             w["new_head"] = 0
+
+        # SÓ rebaixa para OBJ se a palavra for REALMENTE um infinitivo.
+        # Preserva verbos finitos (como οἶδα e ἐσταφυλοτομήθη) como PRED / PRED_CO.
+        xpos = w.get("xpos") or ""
+        feats = w.get("feats") or ""
+        is_inf = "VerbForm=Inf" in feats or (len(xpos) > 4 and xpos[4] == "n") or (len(xpos) > 2 and xpos[2] == "n")
+        
+        if is_inf and w["new_rel"] in {"PRED", "PRED_CO"}:
+            w["new_rel"] = "OBJ" if w["new_rel"] == "PRED" else "OBJ_CO"
 
     return {"text": sent.text, "words": words}
 
