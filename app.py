@@ -63,10 +63,14 @@ def pre_processar_sentencas(texto):
 
 def sanitizar_morfologia_stanza(words):
     """Corrige falhas graves do Stanza em verbos e substantivos iniciais antes do parsing sintático."""
-    
+    if not words:
+        return
+
     # 1. Correção específica para ποιοῦσι (de particípio dativo para verbo 3ª plural)
     for w in words:
-        if w["lemma"] in {"ποιέω", "ποιῶ"} or w["form"] in {"ποιοῦσι", "ποιοῦσιν"}:
+        texto = w.get("text", "")
+        lemma = w.get("lemma", "")
+        if lemma in {"ποιέω", "ποιῶ"} or texto in {"ποιοῦσι", "ποιοῦσιν"}:
             w["upos"] = "VERB"
             w["xpos"] = "v3ppia---"
             w["postag"] = "v3ppia---"
@@ -75,9 +79,11 @@ def sanitizar_morfologia_stanza(words):
     primeira = words[0]
     has_real_verb = any(w["id"] != primeira["id"] and w.get("xpos", "").startswith("v3p") for w in words)
     
-    if primeira["upos"] == "VERB" and has_real_verb:
+    if primeira.get("upos") == "VERB" and has_real_verb:
+        texto_p = primeira.get("text", "")
+        lemma_p = primeira.get("lemma", "")
         # Se for o substantivo Ψώρα
-        if primeira["form"].startswith("Ψώρ") or primeira["lemma"] == "ὁράω":
+        if texto_p.startswith("Ψώρ") or lemma_p == "ὁράω":
             primeira["lemma"] = "ψώρα"
             primeira["upos"] = "NOUN"
             primeira["xpos"] = "n-s---fn-"
