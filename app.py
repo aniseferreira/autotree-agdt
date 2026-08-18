@@ -61,6 +61,31 @@ def pre_processar_sentencas(texto):
 # 4. REGRAS E CONSTANTES AGDT
 # ============================================================
 
+def sanitizar_morfologia_stanza(words):
+    """Corrige falhas graves do Stanza em verbos e substantivos iniciais antes do parsing sintático."""
+    
+    # 1. Correção específica para ποιοῦσι (de particípio dativo para verbo 3ª plural)
+    for w in words:
+        if w["lemma"] in {"ποιέω", "ποιῶ"} or w["form"] in {"ποιοῦσι", "ποιοῦσιν"}:
+            w["upos"] = "VERB"
+            w["xpos"] = "v3ppia---"
+            w["postag"] = "v3ppia---"
+
+    # 2. Verifica se a 1ª palavra foi erroneamente marcada como PRED/VERB (ex: Ψώρα -> ὁράω)
+    primeira = words[0]
+    has_real_verb = any(w["id"] != primeira["id"] and w.get("xpos", "").startswith("v3p") for w in words)
+    
+    if primeira["upos"] == "VERB" and has_real_verb:
+        # Se for o substantivo Ψώρα
+        if primeira["form"].startswith("Ψώρ") or primeira["lemma"] == "ὁράω":
+            primeira["lemma"] = "ψώρα"
+            primeira["upos"] = "NOUN"
+            primeira["xpos"] = "n-s---fn-"
+            primeira["postag"] = "n-s---fn-"
+            primeira["deprel"] = "nsubj"
+
+
+
 PARTICULAS_OUTE = {
     "οὔτε", "ουτε", "οὔτ", "ουτ", "οὔθ", "ουθ",
     "μήτε", "μητε", "μήτ", "μητ", "μήθ", "μηθ"
@@ -496,6 +521,37 @@ def aplicar_participios_substantivados(words):
                 artigo["new_rel"] = "ATR"
                 artigo["new_head"] = w["id"]
 
+def reestruturar_predicativo_objeto(words):
+    """Ajusta a estrutura de verbos como ποιέω que exigem Objeto + Predicativo do Objeto (OCOMP/PNOM)."""
+    verbo_finito = next((w for w in words if w.get("xpos", "").startswith("v3p")), None)
+    if not verbo_finito:
+        return
+
+    # Se o verbo for ποιέω, a raiz (PRED) deve ser ele
+    verbo_finito["new_rel"] = "PRED"
+    verbo_finito["new_head"] = 0
+
+    # Ajusta os sujeitos coordenados pelo καί (Ψώρα, λέπρα, ἐλέφας)
+    nominativos = [w for w in words if extrair_caso(w) == "n" and w["upos"] in {"NOUN", "ADJ"}]
+    for nom in nominativos:
+        nom["new_head"] = verbo_finito["id"]
+        nom["new_rel"] = "SBJ_CO" if len(nominativos) > 1 else "SBJ"
+
+    # Ajusta o Objeto Direto (τοὺς πένητας) e os Predicativos do Objeto (OCOMP / OCOMP_CO)
+    acusativos = [w for w in words if extrair_caso(w) == "a" and w["upos"] in {"NOUN", "ADJ", "PRON"}]
+    
+    # O substantivo 'πένητας' é o Objeto Directo
+    obj_direto = next((a for a in acusativos if a["upos"] == "NOUN"), None)
+    if obj_direto:
+        obj_direto["new_rel"] = "OBJ"
+        obj_direto["new_head"] = verbo_finito["id"]
+
+    # Adjetivos em acusativo (ἐπισημοτέρους, ἐνδοξοτέρους, περιβλέπτους) viram OCOMP (Predicativo do Objeto)
+    for adj in acusativos:
+        if adj["upos"] == "ADJ":
+            adj["new_rel"] = "OCOMP_CO"
+            adj["new_head"] = verbo_finito["id"]
+
 def aplicar_regras_infinitivo(words):
     for infinitivo in list(words):
         feats = infinitivo.get("feats") or ""
@@ -579,6 +635,7 @@ def resolver_sujeito_passivo_neutro(words):
 
 def converter_sentenca(sent):
     words = construir_words(sent)
+    sanitizar_morfologia_stanza(words) # <--- APLICAR AQUI PRIMEIRO
     inicializar_agdt(words)
     aplicar_auxiliares_especiais(words)
     aplicar_regras_infinitivo(words)
