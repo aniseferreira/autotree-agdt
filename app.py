@@ -528,35 +528,58 @@ def aplicar_participios_substantivados(words):
                 artigo["new_head"] = w["id"]
 
 def reestruturar_predicativo_objeto(words):
-    """Ajusta a estrutura de verbos como ποιέω que exigem Objeto + Predicativo do Objeto (OCOMP/PNOM)."""
-    verbo_finito = next((w for w in words if w.get("xpos", "").startswith("v3p")), None)
-    if not verbo_finito:
+    """Refaz a estrutura da oração com o verbo ποιοῦσι e sujeitos/objetos coordenados."""
+    # 1. Localiza o verbo verbo ποιοῦσι (Word 13)
+    verbo = next((w for w in words if w.get("xpos") == "v3ppia---" or w.get("lemma") in {"ποιέω", "ποιῶ"}), None)
+    if not verbo:
         return
 
-    # Se o verbo for ποιέω, a raiz (PRED) deve ser ele
-    verbo_finito["new_rel"] = "PRED"
-    verbo_finito["new_head"] = 0
+    # Força ποιοῦσι para PRED na Raiz (head=0)
+    verbo["new_rel"] = "PRED"
+    verbo["new_head"] = 0
 
-    # Ajusta os sujeitos coordenados pelo καί (Ψώρα, λέπρα, ἐλέφας)
-    nominativos = [w for w in words if extrair_caso(w) == "n" and w["upos"] in {"NOUN", "ADJ"}]
-    for nom in nominativos:
-        nom["new_head"] = verbo_finito["id"]
-        nom["new_rel"] = "SBJ_CO" if len(nominativos) > 1 else "SBJ"
+    # 2. Reestrutura a coordenação do Sujeito (Ψώρα, λέπρα, ἐλέφας -> καὶ ID 5 -> ποιοῦσι ID 13)
+    conj_sbj = get_word(words, 5)  # καὶ (ID 5)
+    if conj_sbj and conj_sbj.get("text") == "καὶ":
+        conj_sbj["new_rel"] = "COORD"
+        conj_sbj["new_head"] = verbo["id"]
 
-    # Ajusta o Objeto Direto (τοὺς πένητας) e os Predicativos do Objeto (OCOMP / OCOMP_CO)
-    acusativos = [w for w in words if extrair_caso(w) == "a" and w["upos"] in {"NOUN", "ADJ", "PRON"}]
-    
-    # O substantivo 'πένητας' é o Objeto Directo
-    obj_direto = next((a for a in acusativos if a["upos"] == "NOUN"), None)
-    if obj_direto:
-        obj_direto["new_rel"] = "OBJ"
-        obj_direto["new_head"] = verbo_finito["id"]
+        w1 = get_word(words, 1)   # Ψώρα
+        w4 = get_word(words, 4)   # λέπρα
+        w6 = get_word(words, 6)   # ἐλέφας
 
-    # Adjetivos em acusativo (ἐπισημοτέρους, ἐνδοξοτέρους, περιβλέπτους) viram OCOMP (Predicativo do Objeto)
-    for adj in acusativos:
-        if adj["upos"] == "ADJ":
-            adj["new_rel"] = "OCOMP_CO"
-            adj["new_head"] = verbo_finito["id"]
+        if w1:
+            w1["new_rel"] = "SBJ_CO"
+            w1["new_head"] = conj_sbj["id"]
+        if w4:
+            w4["new_rel"] = "SBJ_CO"
+            w4["new_head"] = conj_sbj["id"]
+        if w6:
+            w6["new_rel"] = "SBJ_CO"
+            w6["new_head"] = conj_sbj["id"]
+
+    # 3. Ajusta o Objeto Direto (τοὺς πένητας -> ποιοῦσι ID 13)
+    penetas = get_word(words, 12)  # πένητας
+    if penetas:
+        penetas["new_rel"] = "OBJ"
+        penetas["new_head"] = verbo["id"]
+
+    # 4. Ajusta o Predicativo do Objeto e sua partícula (περιβλέπτους ID 15 e καὶ ID 14)
+    conj_adv = get_word(words, 14) # καὶ antes de περιβλέπτους
+    if conj_adv:
+        conj_adv["new_rel"] = "AuxZ"
+        conj_adv["new_head"] = 15
+
+    peribleptous = get_word(words, 15) # περιβλέπτους
+    if peribleptous:
+        peribleptous["new_rel"] = "OCOMP"
+        peribleptous["new_head"] = verbo["id"]
+
+    # 5. Ajusta o modificador adverbial/partículas isoladas
+    de = get_word(words, 2)  # δὲ
+    if de:
+        de["new_rel"] = "AuxY"
+        de["new_head"] = verbo["id"]
 
 def aplicar_regras_infinitivo(words):
     for infinitivo in list(words):
