@@ -487,8 +487,8 @@ def aplicar_regras_infinitivo(words):
         feats = infinitivo.get("feats") or ""
         xpos = infinitivo.get("xpos") or ""
         
-        # Correção: O modo no XPOS do AGDT/Perseus (ex: v--pne---) fica no índice 4
-        is_inf = "VerbForm=Inf" in feats or (len(xpos) > 4 and xpos[4] == "n")
+        # Correção da posição do modo no XPOS (índice 4 no formato AGDT/Perseus: v--pne---)
+        is_inf = "VerbForm=Inf" in feats or (len(xpos) > 4 and xpos[4] == "n") or (len(xpos) > 2 and xpos[2] == "n")
         if not is_inf:
             continue
 
@@ -497,12 +497,14 @@ def aplicar_regras_infinitivo(words):
 
         # 1. ELIPSE VERBAL COM NÓ ARTIFICIAL [0]
         if (infinitivo["head"] == 0 or deprel == "root") and not any(
-            w["upos"] == "VERB" and w["id"] != infinitivo["id"] for w in words
+            w["upos"] == "VERB" and w["id"] != infinitivo["id"] and not (
+                "VerbForm=Inf" in (w.get("feats") or "") or (len(w.get("xpos") or "") > 4 and w.get("xpos")[4] == "n")
+            ) for w in words
         ):
             pred = None
             for w in words:
-                if w["id"] != infinitivo["id"] and w["head"] == infinitivo["id"]:
-                    if w["upos"] in {"ADJ", "NOUN"} or (len(w["xpos"]) > 0 and w["xpos"][0] in {"a", "n"}):
+                if w["id"] != infinitivo["id"] and (w["head"] == infinitivo["id"] or w["head"] == 0):
+                    if w["upos"] in {"ADJ", "NOUN"} or (len(w.get("xpos") or "") > 0 and w.get("xpos")[0] in {"a", "n"}):
                         pred = w
                         break
             
@@ -529,10 +531,12 @@ def aplicar_regras_infinitivo(words):
                 pred["new_head"] = artificial_id
                 words.append(artificial)
 
-                # Ajusta os dependentes do predicativo (ex: dativo de referência "οὐδενὶ")
+                # Corrigi o complemento em dativo (ex: "οὐδενὶ") associado ao predicativo "ἀγαθόν"
                 for child in words:
-                    if child["head"] == pred["id"] and extrair_caso(child) == "d":
-                        child["new_rel"] = "OBJ"
+                    if child["id"] not in {infinitivo["id"], pred["id"], artificial_id}:
+                        if extrair_caso(child) == "d":
+                            child["new_rel"] = "OBJ"
+                            child["new_head"] = pred["id"]
                 continue
 
         # 2. INFINITIVO SUJEITO DE VERBO IMPESSOAL
@@ -542,7 +546,7 @@ def aplicar_regras_infinitivo(words):
 
         # 3. INFINITIVO OBJETO / COMPLETIVO
         infinitivo["new_rel"] = "OBJ"
-
+        
 def converter_sentenca(sent):
     words = construir_words(sent)
     inicializar_agdt(words)
