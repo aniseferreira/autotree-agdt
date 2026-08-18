@@ -429,7 +429,9 @@ def tratar_oracoes_relativas_substantivas(words):
                     ti_word["new_head"] = w["id"]
 
 def aplicar_coordenacao(words):
-    elementos_conj = [w for w in words if w["deprel"].split(":")[0] == "conj"]
+
+    # ADICIONAR "and not w.get('lock')" NESTA LINHA:
+    elementos_conj = [w for w in words if w["deprel"].split(":")[0] == "conj" and not w.get("lock")]
     if not elementos_conj: 
         return
 
@@ -528,58 +530,46 @@ def aplicar_participios_substantivados(words):
                 artigo["new_head"] = w["id"]
 
 def reestruturar_predicativo_objeto(words):
-    """Refaz a estrutura da oração com o verbo ποιοῦσι e sujeitos/objetos coordenados."""
-    # 1. Localiza o verbo verbo ποιοῦσι (Word 13)
+    """Refaz a estrutura da oração com o verbo ποιοῦσι e protege os nós contra a regra de coordenação."""
     verbo = next((w for w in words if w.get("xpos") == "v3ppia---" or w.get("lemma") in {"ποιέω", "ποιῶ"}), None)
     if not verbo:
         return
 
-    # Força ποιοῦσι para PRED na Raiz (head=0)
-    verbo["new_rel"] = "PRED"
-    verbo["new_head"] = 0
+    def travar(w, rel, head):
+        """Define relação, cabeça e trava a palavra para não ser sobrescrita depois."""
+        if w:
+            w["new_rel"] = rel
+            w["new_head"] = head
+            w["lock"] = True
 
-    # 2. Reestrutura a coordenação do Sujeito (Ψώρα, λέπρα, ἐλέφας -> καὶ ID 5 -> ποιοῦσι ID 13)
-    conj_sbj = get_word(words, 5)  # καὶ (ID 5)
-    if conj_sbj and conj_sbj.get("text") == "καὶ":
-        conj_sbj["new_rel"] = "COORD"
-        conj_sbj["new_head"] = verbo["id"]
+    # 1. Verbo Principal -> PRED na Raiz
+    travar(verbo, "PRED", 0)
 
-        w1 = get_word(words, 1)   # Ψώρα
-        w4 = get_word(words, 4)   # λέπρα
-        w6 = get_word(words, 6)   # ἐλέφας
+    # 2. Sujeitos Coordenados (Ψώρα, λέπρα, ἐλέφας) via καὶ (ID 5)
+    conj_sbj = get_word(words, 5)
+    if conj_sbj:
+        travar(conj_sbj, "COORD", verbo["id"])
+        travar(get_word(words, 1), "SBJ_CO", conj_sbj["id"])  # Ψώρα
+        travar(get_word(words, 4), "SBJ_CO", conj_sbj["id"])  # λέπρα
+        travar(get_word(words, 6), "SBJ_CO", conj_sbj["id"])  # ἐλέφας
 
-        if w1:
-            w1["new_rel"] = "SBJ_CO"
-            w1["new_head"] = conj_sbj["id"]
-        if w4:
-            w4["new_rel"] = "SBJ_CO"
-            w4["new_head"] = conj_sbj["id"]
-        if w6:
-            w6["new_rel"] = "SBJ_CO"
-            w6["new_head"] = conj_sbj["id"]
+    # 3. Adjetivos Coordenados (ἐπισημοτέρους, ἐνδοξοτέρους) via καὶ (ID 9)
+    conj_adj = get_word(words, 9)
+    if conj_adj:
+        w4 = get_word(words, 4)
+        travar(conj_adj, "COORD", w4["id"] if w4 else verbo["id"])
+        travar(get_word(words, 7), "ATR_CO", conj_adj["id"])  # ἐπισημοτέρους
+        travar(get_word(words, 10), "ATR_CO", conj_adj["id"]) # ἐνδοξοτέρους
+        
+    # 4. Objeto Direto (πένητας) e Predicativo (περιβλέπτους)
+    travar(get_word(words, 12), "OBJ", verbo["id"])         # πένητας
+    travar(get_word(words, 15), "OCOMP", verbo["id"])       # περιβλέπτους
 
-    # 3. Ajusta o Objeto Direto (τοὺς πένητας -> ποιοῦσι ID 13)
-    penetas = get_word(words, 12)  # πένητας
-    if penetas:
-        penetas["new_rel"] = "OBJ"
-        penetas["new_head"] = verbo["id"]
-
-    # 4. Ajusta o Predicativo do Objeto e sua partícula (περιβλέπτους ID 15 e καὶ ID 14)
-    conj_adv = get_word(words, 14) # καὶ antes de περιβλέπτους
-    if conj_adv:
-        conj_adv["new_rel"] = "AuxZ"
-        conj_adv["new_head"] = 15
-
-    peribleptous = get_word(words, 15) # περιβλέπτους
-    if peribleptous:
-        peribleptous["new_rel"] = "OCOMP"
-        peribleptous["new_head"] = verbo["id"]
-
-    # 5. Ajusta o modificador adverbial/partículas isoladas
-    de = get_word(words, 2)  # δὲ
-    if de:
-        de["new_rel"] = "AuxY"
-        de["new_head"] = verbo["id"]
+    # 5. Partículas e Conjunções secundárias
+    travar(get_word(words, 2), "AuxY", verbo["id"])         # δὲ
+    travar(get_word(words, 3), "ADV", conj_sbj["id"] if conj_sbj else verbo["id"]) # καὶ (word 3)
+    travar(get_word(words, 8), "AuxY", conj_adj["id"] if conj_adj else verbo["id"]) # τε
+    travar(get_word(words, 14), "AuxZ", 15)                 # καὶ (word 14)
 
 def aplicar_regras_infinitivo(words):
     for infinitivo in list(words):
