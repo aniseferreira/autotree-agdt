@@ -381,9 +381,26 @@ def aplicar_auxv(words):
         if w["lemma"] == "εἰμί" and w["deprel"] == "aux":
             w["new_rel"] = "AuxV"
 
+def tratar_oracoes_relativas_substantivas(words):
+    """Garante que 'ὅ τι ἂν... εἴπῃ' seja tratado como complemento OBJ da oração principal e ajusta os pronomes internos."""
+    for w in words:
+        # Identifica 'ὅ' (p-s---na-) e 'τι' (p-s---na-) seguidos de verbo no subjuntivo com ἂν
+        if w["lemma"] in {"ὁ", "ὅς"} and extrair_caso(w) == "a":
+            # Procura por 'τι' adjacente
+            ti_word = next((x for x in words if x["id"] == w["id"] + 1 and x["lemma"] in {"τις", "τίς"}), None)
+            if ti_word:
+                verb = next((x for x in words if x["id"] > w["id"] and x["upos"] in {"VERB", "AUX"}), None)
+                if verb and verb["new_head"] == 14: # se estava ligado a ἀποβαίνει
+                    verb["new_rel"] = "OBJ"
+                    w["new_rel"] = "SBJ"
+                    w["new_head"] = verb["id"]
+                    ti_word["new_rel"] = "ADV"
+                    ti_word["new_head"] = w["id"]
+
 def aplicar_coordenacao(words):
     elementos_conj = [w for w in words if w["deprel"].split(":")[0] == "conj"]
-    if not elementos_conj: return
+    if not elementos_conj: 
+        return
 
     grupos = {}
     for segundo in elementos_conj:
@@ -391,18 +408,28 @@ def aplicar_coordenacao(words):
 
     for primeiro_id, segundos in grupos.items():
         primeiro = get_word(words, primeiro_id)
-        if primeiro is None: continue
+        if primeiro is None: 
+            continue
         elementos = sorted([primeiro] + segundos, key=lambda w: int(w["id"]))
-        funcao_base = primeiro.get("new_rel") or mapear_relacao_basica(primeiro)
-        if funcao_base in {"conj", "cc", "COORD"}: funcao_base = "PRED"
-        if funcao_base.endswith("_CO"): funcao_base = funcao_base[:-3]
+        
+        # Se os elementos coordenados forem acusativos (substantivos/particípios), força a relação de OBJ
+        casos = [extrair_caso(e) for e in elementos]
+        if all(c == "a" for c in casos if c is not None):
+            funcao_base = "OBJ"
+        else:
+            funcao_base = primeiro.get("new_rel") or mapear_relacao_basica(primeiro)
+            if funcao_base in {"conj", "cc", "COORD"}: 
+                funcao_base = "PRED"
+            if funcao_base.endswith("_CO"): 
+                funcao_base = funcao_base[:-3]
 
         ids_elementos = {str(e["id"]) for e in elementos}
         conjuncoes = [w for w in words if w["deprel"].split(":")[0] == "cc" and str(w["head"]) in ids_elementos]
         if not conjuncoes:
             for elemento in elementos:
                 elemento["new_rel"] = f"{funcao_base}_CO"
-                if elemento is not primeiro: elemento["new_head"] = primeiro["new_head"]
+                if elemento is not primeiro: 
+                    elemento["new_head"] = primeiro["new_head"]
             continue
 
         coord_real = conjuncoes[-1]
@@ -529,6 +556,7 @@ def converter_sentenca(sent):
     aplicar_auxc(words)
     aplicar_copula(words)
     aplicar_coordenacao(words)
+    tratar_oracoes_relativas_substantivas(words) # Regra aplicada após reestruturação de heads
     aplicar_auxp(words)
     aplicar_artigos_repetidos(words)
 
@@ -541,13 +569,6 @@ def converter_sentenca(sent):
             w["new_rel"] = w["deprel"]
         if w["new_rel"] == "AuxK": 
             w["new_head"] = 0
-
-        xpos = w.get("xpos") or ""
-        feats = w.get("feats") or ""
-        is_inf = "VerbForm=Inf" in feats or (len(xpos) > 2 and xpos[2] == "n")
-        
-        if is_inf and w["new_rel"] in {"PRED", "PRED_CO"}:
-            w["new_rel"] = "OBJ" if w["new_rel"] == "PRED" else "OBJ_CO"
 
     return {"text": sent.text, "words": words}
 
