@@ -412,19 +412,34 @@ def aplicar_coordenacao(words):
             continue
         elementos = sorted([primeiro] + segundos, key=lambda w: int(w["id"]))
         
-        # Se os elementos coordenados forem acusativos (substantivos/particípios), força a relação de OBJ
-        casos = [extrair_caso(e) for e in elementos]
-        if all(c == "a" for c in casos if c is not None):
-            funcao_base = "OBJ"
-        else:
-            funcao_base = primeiro.get("new_rel") or mapear_relacao_basica(primeiro)
-            if funcao_base in {"conj", "cc", "COORD"}: 
-                funcao_base = "PRED"
-            if funcao_base.endswith("_CO"): 
-                funcao_base = funcao_base[:-3]
-
         ids_elementos = {str(e["id"]) for e in elementos}
         conjuncoes = [w for w in words if w["deprel"].split(":")[0] == "cc" and str(w["head"]) in ids_elementos]
+        
+        # CHECAGEM DE VERBOS FINITOS: Se os elementos são verbos finitos/pessoais, A RELAÇÃO É PRED
+        sao_verbos_finitos = all(
+            e["upos"] in {"VERB", "AUX"} and not (
+                "VerbForm=Inf" in (e.get("feats") or "") or 
+                (len(e.get("xpos") or "") > 4 and e.get("xpos")[4] == "n")
+            ) for e in elementos
+        )
+
+        if sao_verbos_finitos:
+            funcao_base = "PRED"
+            # Se é a coordenação de orações principais, a conjunção sobe para a raiz (head 0)
+            antigo_head = 0 
+        else:
+            # Lógica normal para objetos, sujeitos, etc.
+            casos = [extrair_caso(e) for e in elementos]
+            if all(c == "a" for c in casos if c is not None) and not any(e["upos"] in {"VERB", "AUX"} for e in elementos):
+                funcao_base = "OBJ"
+            else:
+                funcao_base = primeiro.get("new_rel") or mapear_relacao_basica(primeiro)
+                if funcao_base in {"conj", "cc", "COORD"}: 
+                    funcao_base = "PRED"
+                if funcao_base.endswith("_CO"): 
+                    funcao_base = funcao_base[:-3]
+            antigo_head = primeiro["new_head"]
+
         if not conjuncoes:
             for elemento in elementos:
                 elemento["new_rel"] = f"{funcao_base}_CO"
@@ -433,7 +448,6 @@ def aplicar_coordenacao(words):
             continue
 
         coord_real = conjuncoes[-1]
-        antigo_head = primeiro["new_head"]
         coord_real["new_rel"] = "COORD"
         coord_real["new_head"] = antigo_head
 
