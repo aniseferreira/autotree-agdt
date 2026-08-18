@@ -174,7 +174,7 @@ def mapear_relacao_basica(w):
     if text in PONTUACAO_AUXG: return "AuxG"
 
     if text in {"ἂν", "ἄν", "αν"} and rel == "advmod": return "AuxY"
-    if text in {"γὰρ", "γαρ", "μὲν", "μέν", "μεν", "δέ", "δε"} and rel == "advmod": return "AuxY"
+    if text in {"γὰρ", "γαρ", "μὲν", "μέν", "μεν", "δέ", "δε", "δʼ"} and rel == "advmod": return "AuxY"
     if text == "καὶ" and rel == "advmod": return "AuxZ"
 
     if text in NEGACOES:
