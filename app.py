@@ -132,7 +132,7 @@ VERBOS_DICENDI = {
     "ὁράω", "ἀκούω", "γιγνώσκω", "οἶδα", "πυνθάνομαι", "αἰσθάνομαι", "μανθάνω"
 }
 
-NEGACOES = {"οὐ", "οὐκ", "οὐχ", "οὐχι", "μὴ"}
+NEGACOES = {"οὐ", "οὐκ", "οὐχ", "οὐχι", "μὴ", "μή"}
 
 PREPOSICOES_GREGAS = {
     "ἀμφί", "ἀμφὶ", "ἀνά", "ἀνὰ", "ἀντί", "ἀντὶ", "ἀπό", "ἀπὸ",
@@ -205,7 +205,7 @@ def mapear_relacao_basica(w):
     if text in PONTUACAO_AUXG: return "AuxG"
 
     if text in {"ἂν", "ἄν", "αν"} and rel == "advmod": return "AuxY"
-    if text in {"γὰρ", "γαρ", "μὲν", "μέν", "μεν", "δέ", "δε", "δʼ"} and rel == "advmod": return "AuxY"
+    if text in {"γὰρ", "γαρ", "μὲν", "μέν", "μεν", "δέ", "δὲ", "δε", "δʼ"} and rel == "advmod": return "AuxY"
     if text == "καὶ" and rel == "advmod": return "AuxZ"
 
     if text in NEGACOES:
