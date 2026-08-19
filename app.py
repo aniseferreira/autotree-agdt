@@ -1095,6 +1095,49 @@ def aplicar_infinitivo_substantivado_artigo(words):
                     de["new_head"] = verbo_matriz["id"]
                     de["lock"] = True
 
+def aplicar_coordenacao_sujeito_neutro(words):
+    """
+    Trata estruturas do tipo: πᾶν + ADJ1 + καὶ + ADJ2 (nominativo neutro)
+    onde os adjetivos viram SBJ_CO e 'πᾶν' vira ATR.
+    """
+    for i, w in enumerate(words):
+        texto = w.get("text", "").lower()
+        caso = extrair_caso(w)
+        
+        # 1. Identifica 'πᾶν' no nominativo neutro
+        if texto in {"πᾶν", "παν"} and caso == "n":
+            # Procura os próximos dois adjetivos/substantivos no nominativo unidos por 'καὶ'
+            kai = next((c for c in words[i+1:i+6] if c.get("text") == "καὶ" and c.get("upos") == "CCONJ"), None)
+            
+            if kai:
+                adj1 = next((x for x in words[i+1:kai["id"]-1] if extrair_caso(x) == "n" and x.get("upos") in {"ADJ", "NOUN"}), None)
+                adj2 = next((x for x in words[kai["id"]:] if extrair_caso(x) == "n" and x.get("upos") in {"ADJ", "NOUN"}), None)
+                
+                if adj1 and adj2:
+                    # 'καὶ' assume a coordenação
+                    kai["new_rel"] = "COORD"
+                    
+                    # Conecta 'καὶ' ao verbo principal da oração (ex: συνάγει)
+                    verbo = next((v for v in words if v.get("new_rel") == "PRED" or v.get("upos") == "VERB"), None)
+                    if verbo:
+                        kai["new_head"] = verbo["id"]
+
+                    # Os adjetivos viram os núcleos do sujeito coordenado (SBJ_CO)
+                    adj1["new_rel"] = "SBJ_CO"
+                    adj1["new_head"] = kai["id"]
+                    adj2["new_rel"] = "SBJ_CO"
+                    adj2["new_head"] = kai["id"]
+
+                    # 'πᾶν' vira atributo (ATR) do conjunto sujeito (apontando para a conjunção COORD)
+                    w["new_rel"] = "ATR"
+                    w["new_head"] = kai["id"]
+
+                    # Trava a estrutura para o Stanza não desfazer
+                    w["lock"] = True
+                    kai["lock"] = True
+                    adj1["lock"] = True
+                    adj2["lock"] = True
+
 def converter_sentenca(sent):
     words = construir_words(sent)
     
@@ -1108,6 +1151,7 @@ def converter_sentenca(sent):
     aplicar_infinitivo_substantivado_artigo(words)
     
     tratar_adverbios_cristalizados_e_sintagmaticos(words)
+    aplicar_coordenacao_sujeito_neutro(words)  # <--- Inserir aqui
     aplicar_regra_verbos_factitivos(words)
     aplicar_auxiliares_especiais(words)
     
