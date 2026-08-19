@@ -690,12 +690,91 @@ def aplicar_regra_verbos_factitivos(words):
                         adj["new_head"] = w["id"]
                         adj["lock"] = True
 
+# Listas de formas adverbiais cristalizadas da gramática
+ADV_ACUSATIVOS_NEUTROS = {
+    "μέγα", "μεγάλα", "μικρόν", "ὀλίγον", "πολλά", "πολύ", "ταχύ"
+}
+
+ADV_GENITIVOS = {
+    "μικροῦ", "ὀλίγου"
+}
+
+ADV_DATIVOS_FEMININOS = {
+    "ἰδίᾳ", "κοινῇ", "πεζῇ", "σιγῇ", "κύκλῳ"
+}
+
+ADV_SUBSTANTIVADOS_ISOLADOS = {
+    "τέλος", "δωρεάν"
+}
+
+def tratar_adverbios_cristalizados_e_sintagmaticos(words):
+    """
+    Identifica e converte formas nominais/adjetivas com função adverbial (ADV)
+    com base no contexto sintagmático e na ordem das palavras.
+    """
+    for i, w in enumerate(words):
+        texto = w.get("text", "").lower()
+        lemma = w.get("lemma", "").lower()
+        upos = w.get("upos", "")
+        
+        # Ignora se já estiver travado por outra regra
+        if w.get("lock"):
+            continue
+
+        # 1. ACUSATIVOS NEUTROS ADVERBIAIS (μέγα, πολύ, ταχύ, etc.)
+        if texto in ADV_ACUSATIVOS_NEUTROS:
+            proxima = words[i + 1] if i + 1 < len(words) else None
+            anterior = words[i - 1] if i > 0 else None
+            
+            # (A) Entre Artigo e Particípio/Adjetivo (ex: ὁ μέγα δυνάμενος)
+            is_in_position = False
+            if anterior and anterior.get("upos") in {"DET", "ARTICLE"}:
+                if proxima and (proxima.get("upos") in {"VERB", "ADJ"} or "v-p" in proxima.get("xpos", "")):
+                    is_in_position = True
+
+            # (B) Junto a um verbo com o qual NÃO concorda em gênero/número
+            if not is_in_position and proxima and proxima.get("upos") == "VERB":
+                is_in_position = True
+
+            if is_in_position:
+                w["new_rel"] = "ADV"
+                if proxima:
+                    w["new_head"] = proxima["id"]
+                w["lock"] = True
+                continue
+
+        # 2. GENITIVOS E DATIVOS CRISTALIZADOS (μικροῦ, ἰδίᾳ, κοινῇ, σιγῇ, κύκλῳ)
+        if texto in ADV_GENITIVOS or texto in ADV_DATIVOS_FEMININOS:
+            # Verifica se NÃO tem adjetivo/artigo próprio concordando
+            tem_artigo_proprio = False
+            if i > 0 and words[i-1].get("upos") in {"DET", "ARTICLE"}:
+                tem_artigo_proprio = True
+                
+            if not tem_artigo_proprio:
+                w["new_rel"] = "ADV"
+                w["lock"] = True
+                continue
+
+        # 3. SUBSTANTIVOS ADVERBIAIS ISOLADOS (τέλος, δωρεάν)
+        if texto in ADV_SUBSTANTIVADOS_ISOLADOS:
+            # Só vira ADV se estiver ISOLADO (sem artigo antecedente ou adjetivo atributivo)
+            anterior = words[i - 1] if i > 0 else None
+            tem_modificador = anterior and anterior.get("upos") in {"DET", "ARTICLE", "ADJ"}
+            
+            if not tem_modificador:
+                w["new_rel"] = "ADV"
+                w["lock"] = True
+
+
 def converter_sentenca(sent):
     words = construir_words(sent)
     
     # 1. SANITIZAÇÃO MORFOLÓGICA (Troca tags erradas do Stanza na raiz)
     sanitizar_morfologia_stanza(words) 
     inicializar_agdt(words)
+
+    # Executa a varredura de advérbios nominais antes da coordenação
+    tratar_adverbios_cristalizados_e_sintagmaticos(words)
     
     # 2. REGRAS DE VERBOS ESPECÍFICOS E ESTRUTURA ORACIONAL
     aplicar_regra_verbos_factitivos(words)  # Tratamento do ποιέω, OCOMP e particípios
