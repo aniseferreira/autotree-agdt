@@ -89,8 +89,13 @@ def sanitizar_morfologia_stanza(words):
             primeira["xpos"] = "n-s---fn-"
             primeira["postag"] = "n-s---fn-"
             primeira["deprel"] = "nsubj"
-
-
+    # Correção do substantivo λειχήν (que o Stanza confunde com o verbo λειχάζω)
+    for w in words:
+        if w.get("text") == "λειχῆνας":
+            w["lemma"] = "λειχήν"
+            w["upos"] = "NOUN"
+            w["xpos"] = "n-p---ma-"
+            w["postag"] = "n-p---ma-"
 
 PARTICULAS_OUTE = {
     "οὔτε", "ουτε", "οὔτ", "ουτ", "οὔθ", "ουθ",
@@ -805,6 +810,89 @@ def garantir_predicado_raiz(words):
                 w["new_head"] = novo_id
 
         words.append(no_artificial)
+
+def aplicar_estrutura_aci_e_disjuncao(words):
+    """
+    Trata orações de Acusativo com Infinitivo (AcI) dependentes de verbo impessoal ou nó artificial [0],
+    além de estruturar a coordenação disjuntiva (ἤ) e exemplificadores (οἷον).
+    """
+    no_artificial = next((w for w in words if w.get("is_artificial")), None)
+    
+    # 1. Trata o Infinitivo como Sujeito (SBJ) do nó [0] ou de verbo impessoal
+    dokein = next((w for w in words if w.get("lemma") == "δοκέω" and "v--p" in w.get("xpos", "")), None)
+    if dokein and no_artificial:
+        dokein["new_rel"] = "SBJ"
+        dokein["new_head"] = no_artificial["id"]
+        dokein["lock"] = True
+        
+        # O infinitivo dependente (ἔχειν) vira OBJ de δοκεῖν
+        echein = next((w for w in words if w.get("lemma") == "ἔχω" and "v--p" in w.get("xpos", "")), None)
+        if echein:
+            echein["new_rel"] = "OBJ"
+            echein["new_head"] = dokein["id"]
+            echein["lock"] = True
+
+            # O sujeito do infinitivo em acusativo (αὐτόν) vira SBJ de δοκεῖν
+            auton = next((w for w in words if w.get("text") == "αὐτὸν"), None)
+            if auton:
+                auton["new_rel"] = "SBJ"
+                auton["new_head"] = dokein["id"]
+                auton["lock"] = True
+
+        # Adjetivo associado (ἀγαθόν) vira PNOM do nó artificial [0]
+        agathon = next((w for w in words if w.get("text") == "ἀγαθὸν"), None)
+        if agathon:
+            agathon["new_rel"] = "PNOM"
+            agathon["new_head"] = no_artificial["id"]
+            agathon["lock"] = True
+
+    # 2. Estruturação da coordenação disjuntiva com 'ἤ' (IDs 8 e 10)
+    # Transforma o 'ἤ' principal (Word 10) em COORD apontando para o verbo 'ἔχειν'
+    conj_eta_main = next((w for w in words if w.get("text") == "ἤ" and w["id"] == "10"), None)
+    echein = next((w for w in words if w.get("lemma") == "ἔχω"), None)
+    
+    if conj_eta_main and echein:
+        conj_eta_main["new_rel"] = "COORD"
+        conj_eta_main["new_head"] = echein["id"]
+        conj_eta_main["lock"] = True
+
+        # Elementos coordenados em acusativo (ψώραν, λέπραν, ἐλέφαντα, πάθος) viram OBJ_CO
+        for id_w in ["7", "9", "11", "14"]:
+            w = get_word(words, id_w)
+            if w:
+                w["new_rel"] = "OBJ_CO"
+                w["new_head"] = conj_eta_main["id"]
+                w["lock"] = True
+
+        # Partícula correlativa 'ἤ' antecedente (Word 8) vira AuxY
+        eta_aux = get_word(words, 8)
+        if eta_aux:
+            eta_aux["new_rel"] = "AuxY"
+            eta_aux["new_head"] = conj_eta_main["id"]
+            eta_aux["lock"] = True
+
+    # 3. Tratamento de 'οἷον' exemplificador e coordenação posterior (Words 16, 17, 18, 19)
+    conj_eta_app = next((w for w in words if w.get("text") == "ἤ" and w["id"] == "18"), None)
+    pathos = get_word(words, 14)
+    
+    if conj_eta_app and pathos:
+        conj_eta_app["new_rel"] = "COORD"
+        conj_eta_app["new_head"] = pathos["id"]
+        conj_eta_app["lock"] = True
+
+        oion = get_word(words, 16)
+        if oion:
+            oion["new_rel"] = "AuxZ"
+            oion["new_head"] = conj_eta_app["id"]
+            oion["lock"] = True
+
+        # Como você prefere não arriscar APOS genérico agora, eles podem herdar a relação do conjunto
+        for id_w in ["17", "19"]:
+            w = get_word(words, id_w)
+            if w:
+                w["new_rel"] = "APOS_CO"
+                w["new_head"] = conj_eta_app["id"]
+                w["lock"] = True
 
 def converter_sentenca(sent):
     words = construir_words(sent)
