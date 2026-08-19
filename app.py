@@ -19,6 +19,36 @@ st.write(
     "(compatível com o Arethusa) ou exporte em **CoNLL-U** utilizando o Stanza."
 )
 
+# ==========================================
+# FUNÇÕES UTILITÁRIAS (Colocar no topo do app.py)
+# ==========================================
+
+def get_word(words, target_id):
+    """Retorna o dicionário da palavra com o id especificado (suporta int ou str)."""
+    if target_id is None:
+        return None
+    return next((w for w in words if str(w.get("id")) == str(target_id)), None)
+
+
+def extrair_genero(w):
+    """Extrai o gênero ('m', 'f', 'n') a partir da postag/xpos no formato AGDT (9 caracteres)."""
+    postag = w.get("postag") or w.get("xpos") or ""
+    if len(postag) >= 7:
+        gen = postag[6]
+        if gen in {"m", "f", "n"}:
+            return gen
+    return None
+
+
+def extrair_caso(w):
+    """Extrai o caso ('n', 'g', 'd', 'a', 'v') a partir da postag/xpos no formato AGDT."""
+    postag = w.get("postag") or w.get("xpos") or ""
+    if len(postag) >= 8:
+        caso = postag[7]
+        if caso in {"n", "g", "d", "a", "v"}:
+            return caso
+    return None
+
 # ============================================================
 # 2. INICIALIZAÇÃO DO STANZA COM CACHE
 # ============================================================
