@@ -894,39 +894,113 @@ def aplicar_estrutura_aci_e_disjuncao(words):
                 w["new_head"] = conj_eta_app["id"]
                 w["lock"] = True
 
+def aplicar_estrutura_aci_e_disjuncao(words):
+    """
+    Trata orações de Acusativo com Infinitivo (AcI) dependentes de 'δοκεῖν',
+    corrigindo a inversão onde δοκεῖν vira OBJ de ἔχειν, além de estruturar 
+    a coordenação disjuntiva (ἤ) e os exemplificadores (οἷον).
+    """
+    no_artificial = next((w for w in words if w.get("is_artificial") or w.get("form") == "[0]"), None)
+    head_matriz = no_artificial["id"] if no_artificial else 0
+
+    # 1. Correção de Regência do AcI (δοκεῖν = SBJ da matriz; ἔχειν = OBJ de δοκεῖν)
+    dokein = next((w for w in words if w.get("lemma") == "δοκέω" and ("v--p" in w.get("xpos", "") or w.get("form") == "δοκεῖν")), None)
+    if dokein:
+        dokein["new_rel"] = "SBJ"
+        dokein["new_head"] = head_matriz
+        dokein["lock"] = True
+        
+        # O infinitivo dependente (ἔχειν) vira OBJ de δοκεῖν
+        echein = next((w for w in words if w.get("lemma") == "ἔχω" and ("v--p" in w.get("xpos", "") or w.get("form") == "ἔχειν")), None)
+        if echein:
+            echein["new_rel"] = "OBJ"
+            echein["new_head"] = dokein["id"]
+            echein["lock"] = True
+
+        # Sujeito em acusativo (αὐτόν) vira SBJ do infinitivo
+        auton = next((w for w in words if w.get("text") == "αὐτὸν"), None)
+        if auton:
+            auton["new_rel"] = "SBJ"
+            auton["new_head"] = dokein["id"]
+            auton["lock"] = True
+
+        # Adjetivo associado (ἀγαθόν) vira PNOM do nó artificial
+        agathon = next((w for w in words if w.get("text") == "ἀγαθὸν"), None)
+        if agathon:
+            agathon["new_rel"] = "PNOM"
+            agathon["new_head"] = head_matriz
+            agathon["lock"] = True
+
+    # 2. Estruturação da coordenação disjuntiva com 'ἤ' (IDs 8 e 10)
+    conj_eta_main = next((w for w in words if w.get("text") == "ἤ" and str(w["id"]) == "10"), None)
+    echein = next((w for w in words if w.get("lemma") == "ἔχω"), None)
+    
+    if conj_eta_main and echein:
+        conj_eta_main["new_rel"] = "COORD"
+        conj_eta_main["new_head"] = echein["id"]
+        conj_eta_main["lock"] = True
+
+        # Elementos coordenados em acusativo (ψώραν, λέπραν, ἐλέφαντα, πάθος)
+        for id_w in ["7", "9", "11", "14"]:
+            w = get_word(words, id_w)
+            if w:
+                w["new_rel"] = "OBJ_CO"
+                w["new_head"] = conj_eta_main["id"]
+                w["lock"] = True
+
+        eta_aux = get_word(words, 8)
+        if eta_aux:
+            eta_aux["new_rel"] = "AuxY"
+            eta_aux["new_head"] = conj_eta_main["id"]
+            eta_aux["lock"] = True
+
+    # 3. Tratamento de 'οἷον' exemplificador (Words 16, 17, 18, 19)
+    conj_eta_app = next((w for w in words if w.get("text") == "ἤ" and str(w["id"]) == "18"), None)
+    pathos = get_word(words, 14)
+    
+    if conj_eta_app and pathos:
+        conj_eta_app["new_rel"] = "COORD"
+        conj_eta_app["new_head"] = pathos["id"]
+        conj_eta_app["lock"] = True
+
+        oion = get_word(words, 16)
+        if oion:
+            oion["new_rel"] = "AuxZ"
+            oion["new_head"] = conj_eta_app["id"]
+            oion["lock"] = True
+
+        for id_w in ["17", "19"]:
+            w = get_word(words, id_w)
+            if w:
+                w["new_rel"] = "APOS_CO"
+                w["new_head"] = conj_eta_app["id"]
+                w["lock"] = True
+
 def converter_sentenca(sent):
     words = construir_words(sent)
     
-    # 1. SANITIZAÇÃO MORFOLÓGICA (Troca tags erradas do Stanza, ex: Ψώρα, ποιοῦσι, λειχῆνας)
     sanitizar_morfologia_stanza(words) 
     inicializar_agdt(words)
     
-    # 2. ADVERBIAIS CRISTALIZADOS E SINTAGMÁTICOS (μέγα, πολύ, σιγῇ, etc.)
     tratar_adverbios_cristalizados_e_sintagmaticos(words)
-    
-    # 3. REGRAS DE VERBOS FACTITIVOS E REGRAS DE ESTRUTURA
-    aplicar_regra_verbos_factitivos(words)  # Tratamento do ποιέω, OCOMP e particípios
+    aplicar_regra_verbos_factitivos(words)
     aplicar_auxiliares_especiais(words)
     
-    # 4. TRATAMENTO DE ORAÇÃO NOMINAL (Insere nó artificial [0] se não houver verbo finito)
+    # 1. Insere nó artificial [0] se a oração for nominal
     garantir_predicado_raiz(words)
     
-    # 5. CORREÇÃO DE ESTRUTURAS ESPECÍFICAS (AcI / Regência de δοκεῖν + Infinitivo)
-    corrigir_regencia_dokein_infinitivo(words)
+    # 2. Executa o AcI unificado e ajusta regência do δοκεῖν / ἔχειν
     aplicar_estrutura_aci_e_disjuncao(words)
     
-    # 6. REGRAS SINTÁTICAS PADRÃO E CÓPULA
     aplicar_regras_infinitivo(words)
     aplicar_participios_substantivados(words)
     aplicar_copula(words)
     
-    # 7. COORDENAÇÃO (Roda respeitando as travas "lock": True)
     aplicar_coordenacao(words)
     aplicar_oute_correlativo(words)
     aplicar_artigos_repetidos(words)
     aplicar_auxp(words)
     
-    # 8. RESOLUÇÃO FINAL DE TRAVAS E ATRIBUIÇÃO DE HEADS/RELS
     for w in words:
         if w.get("lock"):
             continue
@@ -938,7 +1012,6 @@ def converter_sentenca(sent):
         if w["new_rel"] == "AuxK": 
             w["new_head"] = 0
 
-        # Preserva verbos finitos e ajusta apenas infinitivos reais como PRED -> OBJ
         xpos = w.get("xpos") or ""
         feats = w.get("feats") or ""
         is_inf = "VerbForm=Inf" in feats or (len(xpos) > 4 and xpos[4] == "n") or (len(xpos) > 2 and xpos[2] == "n")
