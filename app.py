@@ -429,9 +429,10 @@ def tratar_oracoes_relativas_substantivas(words):
                     ti_word["new_head"] = w["id"]
 
 def aplicar_coordenacao(words):
-
-    # ADICIONAR "and not w.get('lock')" NESTA LINHA:
-    elementos_conj = [w for w in words if w["deprel"].split(":")[0] == "conj" and not w.get("lock")]
+    elementos_conj = [
+        w for w in words 
+        if w.get("deprel", "").split(":")[0] == "conj" and not w.get("lock")
+    ]
     if not elementos_conj: 
         return
 
@@ -770,25 +771,26 @@ def garantir_predicado_raiz(words):
     Para orações nominais sem verbo finito: insere um nó artificial [0] (εἰμί) 
     como PRED na raiz (head=0) e pendura SBJ e PNOM/OBJ nele.
     """
-    # Checa se já existe algum PRED explicitado
     tem_pred = any(w.get("new_rel") == "PRED" for w in words)
     
-    # Checa se há verbo finito (indicativo, subjuntivo, optativo, imperativo)
     tem_verbo_finito = any(
         "v" in w.get("xpos", "")[:1] and w.get("xpos", "")[4:5] in {"i", "s", "o", "m"}
         for w in words
     )
 
     if not tem_pred and not tem_verbo_finito:
-        # 1. Cria o nó artificial aT / [0]
+        novo_id = str(len(words) + 1)
+        
         no_artificial = {
-            "id": 0,  # ID virtual da raiz artificial
+            "id": novo_id,
+            "text": "[0]",
             "form": "[0]",
             "lemma": "εἰμί",
             "postag": "v3spia---",
             "xpos": "v3spia---",
             "upos": "VERB",
             "head": 0,
+            "deprel": "root",  # Chave essencial para não quebrar o KeyError
             "relation": "PRED",
             "new_head": 0,
             "new_rel": "PRED",
@@ -796,17 +798,13 @@ def garantir_predicado_raiz(words):
             "lock": True
         }
 
-        # 2. Reancora os termos órfãos da oração principal ao nó artificial
         for w in words:
             if w.get("lock"):
                 continue
-            
-            # Sujeitos, Predicativos Nominais ou Objetos soltos passam a apontar para o [0]
             if w.get("new_rel") in {"SBJ", "PNOM", "OBJ", "ADV"} and w.get("new_head") in {0, None}:
-                w["new_head"] = 0  # Na árvore XML, apontará para o nó [0]
-                
-        # Insere o nó no início da lista de processamento como referência
-        words.insert(0, no_artificial)
+                w["new_head"] = novo_id
+
+        words.append(no_artificial)
 
 def converter_sentenca(sent):
     words = construir_words(sent)
