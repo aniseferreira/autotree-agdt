@@ -652,25 +652,73 @@ def resolver_sujeito_passivo_neutro(words):
                         if child["upos"] in {"PRON", "NOUN", "ADJ", "DET"}:
                             child["new_rel"] = "SBJ"
 
+def aplicar_regra_verbos_factitivos(words):
+    """
+    Trata verbos factitivos (ποιέω/ποιῶ) que exigem Objeto + Predicativo (OCOMP),
+    além de reestruturar particípios substantivados (Artigo + Particípio).
+    """
+    for w in words:
+        # 1. Correção do Particípio Substantivado (ex: 'τοὺς ἔχοντας')
+        # Se for um particípio no acusativo
+        is_participle = "v-p" in w.get("xpos", "") or (w.get("upos") == "VERB" and "VerbForm=Part" in w.get("feats", ""))
+        if is_participle and extrair_caso(w) == "a":
+            # Procura artigo acusativo associado
+            for art in words:
+                is_art = art.get("upos") in {"DET", "ARTICLE"} or art.get("postag", "").startswith("l")
+                if is_art and extrair_caso(art) == "a" and art["head"] == w["id"]:
+                    art["new_rel"] = "ATR"
+                    art["new_head"] = w["id"]
+                    art["lock"] = True
+                    w["new_rel"] = "OBJ"
+                    w["lock"] = True
+
+        # 2. Correção de Verbo Finito Factitivo (ποιοῦσι / ποιεῖ)
+        is_factitive = w.get("lemma") in {"ποιέω", "ποιῶ"} and not is_participle
+        if is_factitive:
+            # Se não for oração subordinada, fixa como PRED na Raiz
+            if w.get("new_rel") not in {"ADV", "OBJ", "SBJ"}:
+                w["new_rel"] = "PRED"
+                w["new_head"] = 0
+                w["lock"] = True
+
+            # Converte adjetivos acusativos sem substantivo próprio em OCOMP
+            for adj in words:
+                if adj.get("upos") == "ADJ" and extrair_caso(adj) == "a":
+                    # Se o Stanza marcou erroneamente como ATR, OBJ ou OBJ_CO
+                    if adj.get("new_rel") in {"ATR", "OBJ_CO", "OBJ", None}:
+                        adj["new_rel"] = "OCOMP"
+                        adj["new_head"] = w["id"]
+                        adj["lock"] = True
+
 def converter_sentenca(sent):
     words = construir_words(sent)
-    sanitizar_morfologia_stanza(words) # <--- APLICAR AQUI PRIMEIRO
+    
+    # 1. SANITIZAÇÃO MORFOLÓGICA (Troca tags erradas do Stanza na raiz)
+    sanitizar_morfologia_stanza(words) 
     inicializar_agdt(words)
+    
+    # 2. REGRAS DE VERBOS ESPECÍFICOS E ESTRUTURA ORACIONAL
+    aplicar_regra_verbos_factitivos(words)  # Tratamento do ποιέω, OCOMP e particípios
     aplicar_auxiliares_especiais(words)
-    aplicar_regras_infinitivo(words)
+    aplicar_regras_infinitivo(words)        # Elipse com nó [0], infinitivos completivos
     aplicar_participios_substantivados(words)
     
+    # 3. NÚCLEOS SINTÁTICOS E SUBORDINAÇÃO
+    aplicar_auxv(words)
+    aplicar_auxc(words)                     # Conjunções subordinativas
+    aplicar_copula(words)                   # Define PNOM e reestrutura o verbo copular
+    
+    # 4. COORDENAÇÃO (Roda DEPOIS de estabelecer PRED, PNOM, OBJ, SBJ)
+    aplicar_coordenacao(words)              # Distribui os rótulos _CO
     aplicar_oute_correlativo(words)
     
-    aplicar_auxv(words)
-    aplicar_auxc(words)
-    aplicar_copula(words)
-    aplicar_coordenacao(words)
-    aplicar_auxp(words)
+    # 5. ESTRUTURAS SECUNDÁRIAS E LIMPEZA
+    aplicar_auxp(words)                     # Preposições
     aplicar_artigos_repetidos(words)
-
     resolver_predicados_excedentes(words)
-    resolver_sujeito_passivo_neutro(words) # Promove 'αὐτὸ' a SBJ do verbo passivo
+    resolver_sujeito_passivo_neutro(words)# Promove 'αὐτὸ' a SBJ do verbo passivo
+
+    # 6. ATRIBUIÇÃO FINAL E TRAVAS
 
     for w in words:
         if w["new_head"] is None: 
