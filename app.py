@@ -999,12 +999,12 @@ def aplicar_estrutura_aci_e_disjuncao(words):
             oion["new_head"] = conj_eta_app["id"]
             oion["lock"] = True
 
-for id_w in ["17", "19"]:
-            w = get_word(words, id_w)
-            if w:
-                w["new_rel"] = "APOS_CO"
-                w["new_head"] = conj_eta_app["id"]
-                w["lock"] = True
+    for id_w in ["17", "19"]:
+                w = get_word(words, id_w)
+                if w:
+                    w["new_rel"] = "APOS_CO"
+                    w["new_head"] = conj_eta_app["id"]
+                    w["lock"] = True
 
 
 def get_word(words, target_id):
