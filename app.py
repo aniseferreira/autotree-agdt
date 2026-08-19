@@ -976,11 +976,77 @@ def aplicar_estrutura_aci_e_disjuncao(words):
                 w["new_head"] = conj_eta_app["id"]
                 w["lock"] = True
 
+def desconstruir_atribuicoes_sem_concordancia(words):
+    """
+    Remove atribuições do Stanza onde adjetivos/artigos são colocados como ATR
+    de palavras com as quais NÃO concordam em gênero/caso/número.
+    """
+    for w in words:
+        if w.get("lock"):
+            continue
+            
+        upos = w.get("upos", "")
+        if upos in {"DET", "ARTICLE", "ADJ"}:
+            head_id = w.get("new_head") or w.get("head")
+            head_word = get_word(words, head_id)
+            
+            if head_word:
+                gen_w = extrair_genero(w) # pega 'm', 'f', 'n' da postag
+                gen_h = extrair_genero(head_word)
+                caso_w = extrair_caso(w)
+                caso_h = extrair_caso(head_word)
+                
+                # Se ambos têm gênero definido e são DIFERENTES (ex: neutro com masculino)
+                if gen_w and gen_h and gen_w != gen_h and gen_w != "_" and gen_h != "_":
+                    # Desconecta a dependência absurda
+                    w["new_head"] = None
+                    w["new_rel"] = None
+
+
+def aplicar_infinitivo_substantivado_artigo(words):
+    """
+    Trata estruturas de Infinitivo Substantivado por artigo neutro (τὸ ... ἰδεῖν),
+    em que o artigo τὸ articula o infinitivo como SBJ ou OBJ do verbo principal.
+    """
+    for w in words:
+        texto = w.get("text", "").lower()
+        upos = w.get("upos", "")
+        
+        # Procura o artigo neutro singular τὸ (ou τοῦ, τῷ) em início de frase ou oração
+        if texto in {"τὸ", "τοῦ", "τῷ"} and upos in {"DET", "ARTICLE"}:
+            # Busca o primeiro infinitivo posterior na oração
+            infinitivo = next((x for x in words[w["id"]:] if "v--p" in x.get("xpos", "") or "VerbForm=Inf" in x.get("feats", "")), None)
+            verbo_matriz = next((v for v in words if v.get("new_rel") == "PRED" or (v.get("upos") == "VERB" and "v3" in v.get("xpos", ""))), None)
+            
+            if infinitivo and verbo_matriz:
+                # O infinitivo vira o SUJEITO (SBJ) do verbo matriz (ex: σημαίνει)
+                infinitivo["new_rel"] = "SBJ"
+                infinitivo["new_head"] = verbo_matriz["id"]
+                infinitivo["lock"] = True
+                
+                # O artigo τὸ vira ATR dependente do próprio infinitivo
+                w["new_rel"] = "ATR"
+                w["new_head"] = infinitivo["id"]
+                w["lock"] = True
+                
+                # Partícula δὲ após o artigo depende da matriz como AuxY
+                de = next((x for x in words if x.get("text") in {"δὲ", "δέ"} and x["id"] == w["id"] + 1), None)
+                if de:
+                    de["new_rel"] = "AuxY"
+                    de["new_head"] = verbo_matriz["id"]
+                    de["lock"] = True
+
 def converter_sentenca(sent):
     words = construir_words(sent)
     
     sanitizar_morfologia_stanza(words) 
     inicializar_agdt(words)
+
+# 1. Quebra conexões absurdas do Stanza sem concordância (ex: τὸ com ἄλλον)
+    desconstruir_atribuicoes_sem_concordancia(words)
+    
+    # 2. Aplica a estrutura de Infinitivo Substantivado (τὸ ... ἰδεῖν -> SBJ de σημαίνει)
+    aplicar_infinitivo_substantivado_artigo(words)
     
     tratar_adverbios_cristalizados_e_sintagmaticos(words)
     aplicar_regra_verbos_factitivos(words)
