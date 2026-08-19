@@ -974,7 +974,33 @@ def aplicar_estrutura_aci_e_disjuncao(words):
             if w:
                 w["new_rel"] = "APOS_CO"
                 w["new_head"] = conj_eta_app["id"]
-                w["lock"] = True
+                w["lock"] = Truedef get_word(words, target_id):
+    """Retorna o dicionário da palavra com o id especificado (suporta int ou str)."""
+    if target_id is None:
+        return None
+    return next((w for w in words if str(w.get("id")) == str(target_id)), None)
+
+
+def extrair_genero(w):
+    """Extrai o gênero ('m', 'f', 'n') a partir da postag/xpos no formato AGDT (9 caracteres)."""
+    postag = w.get("postag") or w.get("xpos") or ""
+    if len(postag) >= 7:
+        gen = postag[6]  # Posição 7 da postag de 9 posições
+        if gen in {"m", "f", "n"}:
+            return gen
+    return None
+
+
+def extrair_caso(w):
+    """Extrai o caso ('n', 'g', 'd', 'a', 'v') a partir da postag/xpos no formato AGDT."""
+    postag = w.get("postag") or w.get("xpos") or ""
+    if len(postag) >= 8:
+        caso = postag[7]  # Posição 8 da postag de 9 posições
+        if caso in {"n", "g", "d", "a", "v"}:
+            return caso
+    return None
+
+
 
 def desconstruir_atribuicoes_sem_concordancia(words):
     """
