@@ -897,40 +897,40 @@ def aplicar_estrutura_aci_e_disjuncao(words):
 def converter_sentenca(sent):
     words = construir_words(sent)
     
-    # 1. SANITIZAÇÃO MORFOLÓGICA (Troca tags erradas do Stanza na raiz)
+    # 1. SANITIZAÇÃO MORFOLÓGICA (Troca tags erradas do Stanza, ex: Ψώρα, ποιοῦσι, λειχῆνας)
     sanitizar_morfologia_stanza(words) 
     inicializar_agdt(words)
-
-    # Executa a varredura de advérbios nominais antes da coordenação
+    
+    # 2. ADVERBIAIS CRISTALIZADOS E SINTAGMÁTICOS (μέγα, πολύ, σιγῇ, etc.)
     tratar_adverbios_cristalizados_e_sintagmaticos(words)
     
-    # 2. REGRAS DE VERBOS ESPECÍFICOS E ESTRUTURA ORACIONAL
+    # 3. REGRAS DE VERBOS FACTITIVOS E REGRAS DE ESTRUTURA
     aplicar_regra_verbos_factitivos(words)  # Tratamento do ποιέω, OCOMP e particípios
     aplicar_auxiliares_especiais(words)
-    aplicar_regras_infinitivo(words)        # Elipse com nó [0], infinitivos completivos
+    
+    # 4. TRATAMENTO DE ORAÇÃO NOMINAL (Insere nó artificial [0] se não houver verbo finito)
+    garantir_predicado_raiz(words)
+    
+    # 5. CORREÇÃO DE ESTRUTURAS ESPECÍFICAS (AcI / Regência de δοκεῖν + Infinitivo)
+    corrigir_regencia_dokein_infinitivo(words)
+    aplicar_estrutura_aci_e_disjuncao(words)
+    
+    # 6. REGRAS SINTÁTICAS PADRÃO E CÓPULA
+    aplicar_regras_infinitivo(words)
     aplicar_participios_substantivados(words)
+    aplicar_copula(words)
     
-    # 3. NÚCLEOS SINTÁTICOS E SUBORDINAÇÃO
-    aplicar_auxv(words)
-    aplicar_auxc(words)                     # Conjunções subordinativas
-    aplicar_copula(words)                   # Define PNOM e reestrutura o verbo copular
-
-    # VERIFICAÇÃO DE ORAÇÃO NOMINAL:
-    garantir_predicado_raiz(words)  # Insere [0] se a frase for puramente nominal
-    
-    # 4. COORDENAÇÃO (Roda DEPOIS de estabelecer PRED, PNOM, OBJ, SBJ)
-    aplicar_coordenacao(words)              # Distribui os rótulos _CO
+    # 7. COORDENAÇÃO (Roda respeitando as travas "lock": True)
+    aplicar_coordenacao(words)
     aplicar_oute_correlativo(words)
-    
-    # 5. ESTRUTURAS SECUNDÁRIAS E LIMPEZA
-    aplicar_auxp(words)                     # Preposições
     aplicar_artigos_repetidos(words)
-    resolver_predicados_excedentes(words)
-    resolver_sujeito_passivo_neutro(words)# Promove 'αὐτὸ' a SBJ do verbo passivo
-
-    # 6. ATRIBUIÇÃO FINAL E TRAVAS
-
+    aplicar_auxp(words)
+    
+    # 8. RESOLUÇÃO FINAL DE TRAVAS E ATRIBUIÇÃO DE HEADS/RELS
     for w in words:
+        if w.get("lock"):
+            continue
+
         if w["new_head"] is None: 
             w["new_head"] = w["head"]
         if w["new_rel"] is None: 
@@ -938,8 +938,7 @@ def converter_sentenca(sent):
         if w["new_rel"] == "AuxK": 
             w["new_head"] = 0
 
-        # SÓ rebaixa para OBJ se a palavra for REALMENTE um infinitivo.
-        # Preserva verbos finitos (como οἶδα e ἐσταφυλοτομήθη) como PRED / PRED_CO.
+        # Preserva verbos finitos e ajusta apenas infinitivos reais como PRED -> OBJ
         xpos = w.get("xpos") or ""
         feats = w.get("feats") or ""
         is_inf = "VerbForm=Inf" in feats or (len(xpos) > 4 and xpos[4] == "n") or (len(xpos) > 2 and xpos[2] == "n")
