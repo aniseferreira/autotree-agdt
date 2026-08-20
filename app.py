@@ -1035,34 +1035,42 @@ def eh_predicado_potencial(w):
     return False
 
 def aplicar_coordenacao_predicados_generico(words):
+    """
+    Se houver um COORD na frase e múltiplos predicados potenciais,
+    vincula ambos os predicados ao COORD como PRED_CO e rebaixa conectores secundários.
+    """
     predicados = [w for w in words if eh_predicado_potencial(w)]
 
     if len(predicados) < 2:
         return
 
-    v1, v2 = predicados[0], predicados[1]
+    # Procura um elemento já marcado como COORD ou uma conjunção entre os predicados
+    coord_node = next((w for w in words if w.get("new_rel") == "COORD" or w.get("deprel", "").startswith("cc")), None)
 
-    # Localiza a partícula de coordenação (CCONJ ou PART) entre os dois predicados
-    coord_node = next(
-        (w for w in words 
-         if v1["id"] < w["id"] <= v2["id"] + 1
-         and (w.get("upos") in {"CCONJ", "PART"} or w.get("deprel", "").startswith("cc"))
-         and w.get("text", "").lower() not in {",", "."}),
-        None
-    )
+    if not coord_node:
+        # Pega a primeira conjunção/partícula entre o primeiro e o segundo predicado
+        coord_node = next(
+            (w for w in words 
+             if predicados[0]["id"] < w["id"] <= predicados[1]["id"] + 1
+             and w.get("upos") in {"CCONJ", "PART"}),
+            None
+        )
 
     if coord_node:
         coord_node["new_rel"] = "COORD"
         coord_node["new_head"] = 0
 
-        for v in predicados:
-            v["new_rel"] = "PRED_CO"
-            v["new_head"] = coord_node["id"]
+        # Amarra TODOS os predicados principais diretamente ao COORD
+        for p in predicados:
+            p["new_rel"] = "PRED_CO"
+            p["new_head"] = coord_node["id"]
 
-        # Partículas de apoio (como o primeiro δὲ) viram AuxY ligadas ao COORD
+        # Evita que o 'δέ' (ou outros conectores) tentem ser COORD simultaneamente
         for w in words:
-            if w["id"] != coord_node["id"] and w.get("upos") in {"CCONJ", "PART"} and w.get("new_rel") == "AuxY":
-                w["new_head"] = coord_node["id"]
+            if w["id"] != coord_node["id"] and w.get("upos") in {"CCONJ", "PART"}:
+                if w.get("new_rel") in {"COORD", "PRED_CO"}:
+                    w["new_rel"] = "AuxY"
+                    w["new_head"] = coord_node["id"]
 
 def aplicar_focalizadores_auxz_generico(words):
     """
