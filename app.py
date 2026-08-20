@@ -331,18 +331,21 @@ def aplicar_auxp(words):
 
 def aplicar_auxc(words):
     for conj in words:
-        if conj["new_rel"] != "AuxC": 
+        dep = conj.get("new_rel") or conj.get("deprel") or ""
+        if dep not in {"AuxC", "mark", "sconj"}:
             continue
             
-        if normalizar(conj["text"]) in NEGACOES and conj["deprel"] not in {"mark", "sconj"}:
+        text_clean = limpar_diacriticos(conj["text"]).strip("’'")
+        if text_clean in NEGACOES and dep not in {"mark", "sconj"}:
             continue
             
+        conj["new_rel"] = "AuxC"
+
         subordinate = get_word(words, conj["head"])
         if subordinate is None: 
             continue
 
-        # CORREÇÃO DE SEGURANÇA: Se o Stanza ligou o AuxC a um nome/adjetivo,
-        # busca o verbo mais próximo da subordinada para ser a verdadeira cabeça do AuxC
+        # Se o Stanza apontou o AuxC para um nome (ex: οἰκέτης), resgata o verbo da oração
         if subordinate["upos"] not in {"VERB", "AUX"}:
             verb_candidate = next(
                 (w for w in words[conj["id"]:] if w["upos"] in {"VERB", "AUX"}), 
@@ -351,20 +354,16 @@ def aplicar_auxc(words):
             if verb_candidate:
                 subordinate = verb_candidate
 
-        # Inverte as dependências mantendo a hierarquia original
-        conj["new_head"] = subordinate["new_head"]
+        # Inverte: Conjunção pega a cabeça do verbo, Verbo passa a depender da Conjunção
+        conj["new_head"] = subordinate.get("new_head") or subordinate["head"]
         subordinate["new_head"] = conj["id"]
 
-        text_conj = normalizar(conj["text"])
         matrix_verb = get_word(words, conj["new_head"])
-
-        # Preserva sua regra exata de Integrante (OBJ) vs Adverbial (ADV)
-        is_integrante = text_conj in CONJUNCOES_INTEGRANTES or (
-            text_conj in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
+        is_integrante = text_clean in CONJUNCOES_INTEGRANTES or (
+            text_clean in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
         )
 
         subordinate["new_rel"] = "OBJ" if is_integrante else "ADV"
-
 
 def aplicar_oute_correlativo(words):
     ocorrencias = [w for w in words if e_particula_oute(w)]
@@ -417,10 +416,20 @@ def resolver_predicados_excedentes(words):
 
 def aplicar_copula(words):
     for cop in words:
-        if cop["new_rel"] != "cop": 
+        # Aceita 'cop' ou verbos 'ειμι' / 'γιγνομαι' que vieram como PRED/AUX do Stanza
+        is_copula_lemma = limpar_diacriticos(cop.get("lemma") or cop.get("text")) in {"ειμι", "γιγνομαι"}
+        if cop["new_rel"] != "cop" and not (is_copula_lemma and cop.get("upos") in {"VERB", "AUX"}):
             continue
-            
+
+        # Se não tiver 'head' de 'cop', encontra o predicativo em nominativo apontando para a cópula
         predicative = get_word(words, cop["head"])
+        if predicative is None or predicative["id"] == cop["id"]:
+            predicative = next(
+                (p for p in words if (p.get("head") == cop["id"] or p.get("new_head") == cop["id"]) 
+                 and extrair_caso(p) == "n" and p["id"] != cop["id"]), 
+                None
+            )
+
         if predicative is None: 
             continue
 
