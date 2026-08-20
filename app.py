@@ -378,6 +378,7 @@ def aplicar_oute_correlativo(words):
 
 
 def resolver_predicados_excedentes(words):
+    # 1. Varredura de segurança: Rebaixa PREDs que estão sob AuxC (integrante vs adverbial)
     for w in words:
         head_word = get_word(words, w["new_head"])
         if head_word and head_word.get("new_rel") == "AuxC":
@@ -390,21 +391,28 @@ def resolver_predicados_excedentes(words):
                 )
                 w["new_rel"] = "OBJ" if is_integrante else "ADV"
 
+    # 2. Coleta os PREDs restantes
     preds = [w for w in words if w["new_rel"] == "PRED"]
     if len(preds) <= 1:
         return
 
-    main_pred = next((p for p in preds if p["new_head"] == 0), preds[0])
+    # Define o PRED principal (prefere o que já está apontando para a raiz 0)
+    main_pred = next((p for p in preds if p["new_head"] == 0), preds[-1])
 
+    # 3. Trata os PREDs excedentes
     for p in preds:
         if p["id"] == main_pred["id"]:
             continue
+            
         deprel = p.get("deprel", "")
-        if deprel.startswith("conj") or any(w["deprel"].startswith("cc") for w in words):
+        # Se houver indício de coordenação entre os PREDs
+        if deprel.startswith("conj") or any(w.get("deprel", "").startswith("cc") for w in words):
             p["new_rel"] = "PRED_CO"
             main_pred["new_rel"] = "PRED_CO"
         else:
+            # Rebaixa para oração subordinada/adverbial
             p["new_rel"] = "ADV"
+            p["new_head"] = main_pred["id"]
 
 
 def aplicar_copula(words):
