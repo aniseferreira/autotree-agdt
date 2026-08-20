@@ -309,21 +309,31 @@ def inicializar_agdt(words):
 
 def aplicar_auxp(words):
     for prep in words:
-        if prep["new_rel"] != "AuxP": continue
+        if prep["new_rel"] != "AuxP": 
+            continue
         governed = get_word(words, prep["head"])
-        if governed is None: continue
+        if governed is None: 
+            continue
+            
+        # Proteção: Preposição NUNCA governa o verbo principal da oração
+        if governed["upos"] in {"VERB", "AUX"}:
+            continue
+
         original_relation = governed["new_rel"]
         prep["new_head"] = governed["new_head"]
         governed["new_head"] = prep["id"]
+        
         if original_relation in {"OBJ", "ADV", "ATR", "SBJ", "PRED"}:
-            governed["new_rel"] = original_relation
-        if prep["new_head"] == prep["id"]: prep["new_head"] = 0
-
+            governed["new_rel"] = "ADV" if original_relation == "PRED" else original_relation
+            
+        if prep["new_head"] == prep["id"]: 
+            prep["new_head"] = 0
 
 def aplicar_auxc(words):
     for conj in words:
         if conj["new_rel"] != "AuxC": 
             continue
+            
         if normalizar(conj["text"]) in NEGACOES and conj["deprel"] not in {"mark", "sconj"}:
             continue
             
@@ -331,12 +341,24 @@ def aplicar_auxc(words):
         if subordinate is None: 
             continue
 
+        # CORREÇÃO DE SEGURANÇA: Se o Stanza ligou o AuxC a um nome/adjetivo,
+        # busca o verbo mais próximo da subordinada para ser a verdadeira cabeça do AuxC
+        if subordinate["upos"] not in {"VERB", "AUX"}:
+            verb_candidate = next(
+                (w for w in words[conj["id"]:] if w["upos"] in {"VERB", "AUX"}), 
+                None
+            )
+            if verb_candidate:
+                subordinate = verb_candidate
+
+        # Inverte as dependências mantendo a hierarquia original
         conj["new_head"] = subordinate["new_head"]
         subordinate["new_head"] = conj["id"]
 
         text_conj = normalizar(conj["text"])
         matrix_verb = get_word(words, conj["new_head"])
 
+        # Preserva sua regra exata de Integrante (OBJ) vs Adverbial (ADV)
         is_integrante = text_conj in CONJUNCOES_INTEGRANTES or (
             text_conj in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
         )
