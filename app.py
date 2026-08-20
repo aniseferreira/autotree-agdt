@@ -560,23 +560,25 @@ def aplicar_artigos_repetidos(words):
 
 
 def aplicar_auxiliares_especiais(words):
-    # 1. Localiza o predicado principal da oração (PRED) ou o verbo principal
+    # Procura o predicado principal (PRED ou PRED_CO)
     pred_word = next(
-        (w for w in words if w.get("new_rel") == "PRED" or w.get("upos") in {"VERB", "AUX"}), 
+        (w for w in words if w.get("new_rel") in {"PRED", "PRED_CO"}), 
         None
     )
+    if not pred_word:
+        pred_word = next((w for w in words if w.get("upos") in {"VERB", "AUX"}), None)
 
     for w in words:
-        text = normalizar(w["text"]).strip("’'")
+        # Remove apóstrofos e diacríticos para tratar δʼ, δ’, δέ, etc.
+        text_clean = limpar_diacriticos(w["text"]).strip("’'\'\"")
         
-        # Partículas modais e conectivas oracionais (AuxY) -> Devem apontar para o PRED
-        if text in {"ἄν", "αν", "γάρ", "γαρ", "μέν", "δὲ" "μεν", "δέ", "δε", "δ"}:
+        # Partículas oracionais (AuxY) -> Devem subir para o PRED
+        if text_clean in {"αν", "γαρ", "μεν", "δε", "δ"}:
             w["new_rel"] = "AuxY"
             if pred_word and not w.get("lock"):
-                w["new_head"] = pred_word["id"]
+                w["new_head"] = pred_word["id"]  # Redireciona head para o verbo PRED
         
-        # Partículas de ênfase (AuxZ) -> Mantêm o head original no elemento que enfatizam
-        elif text in {"καί", "και", "καὶ"} and w.get("deprel") == "advmod":
+        elif text_clean == "και" and w.get("deprel") == "advmod":
             w["new_rel"] = "AuxZ"
 
 def aplicar_participios_substantivados(words):
