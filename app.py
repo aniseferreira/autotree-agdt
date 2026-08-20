@@ -211,12 +211,7 @@ def e_pronome_relativo(word):
 # 6. REGRAS DE TRANSFORMAÇÃO E PROCESSAMENTO
 # ============================================================
 
-def sanitizar_morfologia_stanza(words):
-    """Corrige falhas graves do Stanza em verbos e substantivos iniciais antes do parsing sintático."""
-    if not words:
-        return
-
-    # Correção de preposições elididas que o Stanza confunde com adjetivo/advérbio
+# Correção de preposições elididas que o Stanza confunde com adjetivo/advérbio
     for w in words:
         texto_clean = w.get("text", "").strip()
         if texto_clean in PREPOSICOES_GREGAS or limpar_diacriticos(texto_clean) in {"κατ", "καθ", "δια", "μετ", "παρ", "επ", "εφ", "απ", "αφ"}:
@@ -224,37 +219,6 @@ def sanitizar_morfologia_stanza(words):
             w["xpos"] = "r--------"
             w["postag"] = "r--------"
             w["lemma"] = "κατά" if limpar_diacriticos(texto_clean) in {"κατ", "καθ"} else w.get("lemma")
-
-    # 1. Correção específica para ποιοῦσι
-    for w in words:
-        texto = w.get("text", "")
-        lemma = w.get("lemma", "")
-        if lemma in {"ποιέω", "ποιῶ"} or texto in {"ποιοῦσι", "ποιοῦσιν"}:
-            w["upos"] = "VERB"
-            w["xpos"] = "v3ppia---"
-            w["postag"] = "v3ppia---"
-
-    # 2. Correção de substantivo no início da frase marcado como verbo
-    primeira = words[0]
-    has_real_verb = any(w["id"] != primeira["id"] and w.get("xpos", "").startswith("v3p") for w in words)
-    
-    if primeira.get("upos") == "VERB" and has_real_verb:
-        texto_p = primeira.get("text", "")
-        lemma_p = primeira.get("lemma", "")
-        if texto_p.startswith("Ψώρ") or lemma_p == "ὁράω":
-            primeira["lemma"] = "ψώρα"
-            primeira["upos"] = "NOUN"
-            primeira["xpos"] = "n-s---fn-"
-            primeira["postag"] = "n-s---fn-"
-            primeira["deprel"] = "nsubj"
-
-    for w in words:
-        if w.get("text") == "λειχῆνας":
-            w["lemma"] = "λειχήν"
-            w["upos"] = "NOUN"
-            w["xpos"] = "n-p---ma-"
-            w["postag"] = "n-p---ma-"
-
 
 def construir_words(sent):
     words = []
@@ -1219,21 +1183,21 @@ def gerar_agdt_xml(sentences):
     return parsed.toprettyxml(indent="  ")
 
 
-def gerar_conllu(doc):
+def gerar_conllu(sentences_convertidas):
     lines = []
-    for i, sent in enumerate(doc.sentences, start=1):
+    for i, sent in enumerate(sentences_convertidas, start=1):
         lines.append(f"# sent_id = {i}")
-        lines.append(f"# text = {sent.text}")
-        for word in sent.words:
+        lines.append(f"# text = {sent['text']}")
+        for word in sent["words"]:
             fields = [
-                str(word.id),
-                word.text or "_",
-                word.lemma or "_",
-                word.upos or "_",
-                word.xpos or "_",
-                word.feats or "_",
-                str(word.head),
-                word.deprel or "_",
+                str(word["id"]),
+                str(word.get("text", "_")),
+                str(word.get("lemma", "_")),
+                str(word.get("upos", "_")),
+                str(word.get("xpos", "_")),
+                str(word.get("feats", "_")),
+                str(word.get("new_head") if word.get("new_head") is not None else word.get("head", 0)),
+                str(word.get("new_rel") or word.get("deprel", "_")),
                 "_",
                 "_"
             ]
@@ -1281,7 +1245,7 @@ if st.button("Processar Texto", type="primary"):
             sentences_convertidas = [converter_sentenca(sent) for sent in doc.sentences]
             
             xml_str = gerar_agdt_xml(sentences_convertidas)
-            conllu_str = gerar_conllu(doc)
+            conllu_str = gerar_conllu(sentences_convertidas)
 
         st.success(f"Processamento concluído com sucesso! ({len(doc.sentences)} sentença(s) identificada(s))")
         st.subheader("2. Resultados e Exportação")
