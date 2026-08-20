@@ -1175,29 +1175,29 @@ def converter_sentenca(sent):
             w["new_rel"] = "OBJ" if w["new_rel"] == "PRED" else "OBJ_CO"
 
 def ajustar_dependencias_finais(words):
-pred_principal = next((w for w in words if w.get("new_rel") == "PRED" and w.get("new_head") == 0), None)
-
-for w in words:
-    # 1. Recupera postags perdidas
-    if not w.get("postag"):
-        w["postag"] = w.get("xpos") or w.get("feats") or "_"
-
-    # 2. Corrigi ἄχρηστος (id=9): Deve ser PNOM de ἔσται
-    if limpar_diacriticos(w["text"]) in {"αχρηστος"} or w.get("new_rel") == "nmod":
-        w["new_rel"] = "PNOM"
-        if pred_principal:
-            w["new_head"] = pred_principal["id"]
-
-    # 3. Corrigi ὑπηρεσίαν (id=11): Deve ser ADV subordinado à preposição εἰς (id=10)
-    prep_eis = next((p for p in words if limpar_diacriticos(p["text"]) == "εις" and p.get("new_rel") == "AuxP"), None)
-    if prep_eis and w["id"] != prep_eis["id"]:
-        if w.get("new_head") == prep_eis.get("new_head") and w.get("new_rel") == "PNOM":
-            w["new_rel"] = "ADV"
-            w["new_head"] = prep_eis["id"]
-
-    # 4. Corrigi Ponto Final (AuxK): Sempre aponta para a raiz 0
-    if w.get("new_rel") == "AuxK":
-        w["new_head"] = 0
+    pred_principal = next((w for w in words if w.get("new_rel") == "PRED" and w.get("new_head") == 0), None)
+    
+    for w in words:
+        # 1. Recupera postags perdidas
+        if not w.get("postag"):
+            w["postag"] = w.get("xpos") or w.get("feats") or "_"
+    
+        # 2. Corrigi ἄχρηστος (id=9): Deve ser PNOM de ἔσται
+        if limpar_diacriticos(w["text"]) in {"αχρηστος"} or w.get("new_rel") == "nmod":
+            w["new_rel"] = "PNOM"
+            if pred_principal:
+                w["new_head"] = pred_principal["id"]
+    
+        # 3. Corrigi ὑπηρεσίαν (id=11): Deve ser ADV subordinado à preposição εἰς (id=10)
+        prep_eis = next((p for p in words if limpar_diacriticos(p["text"]) == "εις" and p.get("new_rel") == "AuxP"), None)
+        if prep_eis and w["id"] != prep_eis["id"]:
+            if w.get("new_head") == prep_eis.get("new_head") and w.get("new_rel") == "PNOM":
+                w["new_rel"] = "ADV"
+                w["new_head"] = prep_eis["id"]
+    
+        # 4. Corrigi Ponto Final (AuxK): Sempre aponta para a raiz 0
+        if w.get("new_rel") == "AuxK":
+            w["new_head"] = 0
 
     return {"text": sent.text, "words": words}
 
