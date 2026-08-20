@@ -995,6 +995,98 @@ def sanitizar_arvore_agdt(words):
             else:
                 w["new_rel"] = "ATR"
 
+def aplicar_auxp_generico(words):
+    """
+    Inverte a dependência Prep -> Substantivo para Substantivo -> Prep (AuxP)
+    garantindo que não sejam criados ciclos (loops).
+    """
+    for prep in words:
+        if prep.get("upos") != "ADP":
+            continue
+
+        gov_id = prep.get("head")
+        governed = get_word(words, gov_id)
+        if not governed:
+            continue
+
+        # Evita preposição reger verbo diretamente
+        if governed.get("upos") in {"VERB", "AUX"}:
+            continue
+
+        # CHECAGEM ANTI-LOOP: Verifica se o governado já aponta para a preposição
+        if str(governed.get("new_head", governed.get("head"))) == str(prep["id"]):
+            # O governado já apontava para a preposição; reatribui a mãe da preposição ao governado
+            prep["new_head"] = governed.get("head")
+            governed["new_head"] = prep["id"]
+        else:
+            # Reversão padrão de dependência para AuxP
+            prep["new_head"] = governed.get("new_head", governed.get("head"))
+            governed["new_head"] = prep["id"]
+
+        # O termo regido assume a relação sintática interna do sintagma
+        governed["new_rel"] = "ATR" if governed.get("feats", "").find("Case=Gen") != -1 else "ADV"
+        prep["new_rel"] = "AuxP"
+
+
+def aplicar_coordenacao_predicados_generico(words):
+    """
+    Identifica múltiplos predicados principais e promove a conjunção/partícula
+    coordenativa intermediária a COORD (raiz), transformando os verbos em PRED_CO.
+    """
+    # 1. Encontra todos os verbos finitos principais
+    verbos_finitos = [
+        w for w in words
+        if w.get("upos") in {"VERB", "AUX"}
+        and "VerbForm=Inf" not in (w.get("feats") or "")
+        and "VerbForm=Part" not in (w.get("feats") or "")
+    ]
+
+    if len(verbos_finitos) < 2:
+        return
+
+    # 2. Procura a conjunção ou partícula coordenativa (CCONJ ou PART de coordenação) situada entre os verbos
+    v1, v2 = verbos_finitos[0], verbos_finitos[1]
+    coord_node = next(
+        (w for w in words 
+         if v1["id"] < w["id"] < v2["id"] 
+         and w.get("upos") in {"CCONJ", "PART"} 
+         and w.get("deprel", "").startswith("cc")),
+        None
+    )
+
+    if coord_node:
+        coord_node["new_rel"] = "COORD"
+        coord_node["new_head"] = 0  # Eleva a COORD para o topo/raiz
+
+        for v in verbos_finitos:
+            v["new_rel"] = "PRED_CO"
+            v["new_head"] = coord_node["id"]
+
+        # Partículas secundárias do mesmo tipo viram AuxY
+        for w in words:
+            if w["id"] != coord_node["id"] and w.get("upos") == coord_node.get("upos") and w.get("deprel", "").startswith("cc"):
+                w["new_rel"] = "AuxY"
+                w["new_head"] = coord_node["id"]
+
+def aplicar_focalizadores_auxz_generico(words):
+    """
+    Identifica partículas/advérbios focalizadores (ex: καί adverbial, γέ, δή)
+    pendurados em nomes ou adjetivos e aplica AuxZ, sem interferir em negações.
+    """
+    for w in words:
+        head_node = get_word(words, w.get("new_head", w.get("head")))
+        if not head_node:
+            continue
+
+        # Se já foi processado por outra regra (ex: regra de negação prévia), não toca
+        if w.get("new_rel") in {"AuxC", "AuxZ", "AuxE"}:
+            continue
+
+        # Aplica AuxZ apenas se um advérbio/partícula estiver modificando um Nome/Adjetivo
+        if w.get("upos") in {"ADV", "PART"} and head_node.get("upos") in {"NOUN", "ADJ", "PRON", "DET"}:
+            deprel_original = w.get("deprel", "").split(":")[0]
+            if deprel_original in {"advmod", "cc", "amod"}:
+                w["new_rel"] = "AuxZ"
 
 def converter_sentenca(sent):
     words = construir_words(sent)
@@ -1008,9 +1100,8 @@ def converter_sentenca(sent):
     aplicar_infinitivo_substantivado_artigo(words)
     aplicar_artigos_repetidos(words)
     tratar_adverbios_cristalizados_e_sintagmaticos(words)
-    aplicar_auxp(words)
 
-    # 3. Estruturas Verbais Cópulas e Núcleos
+    # 3. Estruturas Verbais, Cópulas e Núcleos
     aplicar_coordenacao_sujeito_neutro(words)
     aplicar_regra_verbos_factitivos(words)
     garantir_predicado_raiz(words)
@@ -1021,28 +1112,31 @@ def converter_sentenca(sent):
     aplicar_copula(words)
 
     # 4. Coordenação e Partículas Correlativas
-    aplicar_coordenacao(words)
+    aplicar_coordenacao_predicados_generico(words) # Promove orações a PRED_CO / COORD
+    aplicar_coordenacao(words)                    # Trata elementos nominais/secundários (conj)
     aplicar_oute_correlativo(words)
     aplicar_conectivos_correlativos(words)
     
-    # 5. Fechamento de Partículas/Auxiliares
+    # 5. Inversão de Preposições e Ajuste de Partículas/Focalizadores
+    aplicar_auxp_generico(words)                  # Substitui o aplicar_auxp antigo
+    aplicar_focalizadores_auxz_generico(words)     # Classifica partículas nominais residuais como AuxZ
     aplicar_auxiliares_especiais(words)
 
-    # 6. Sanitização final de dependências
+    # 6. Sanitização de Árvore e Trava Anti-Loop
     sanitizar_arvore_agdt(words)
-    ajustar_dependencias_finais(words)
 
+    # 7. Preenchimento Final e Tratamento de Resíduos
     for w in words:
         if w.get("lock"):
             continue
 
-        if w["new_head"] is None: 
+        if w.get("new_head") is None: 
             w["new_head"] = w["head"]
             
-        if w["new_rel"] is None or w["new_rel"] in {"nmod", "amod", "advmod", "obj", "nsubj"}: 
+        if w.get("new_rel") is None or w["new_rel"] in {"nmod", "amod", "advmod", "obj", "nsubj"}: 
             w["new_rel"] = mapear_relacao_basica(w)
 
-        if w["new_rel"] == "AuxK": 
+        if w.get("new_rel") == "AuxK": 
             w["new_head"] = 0
 
         # Tratamento especial de infinitivos residuais
@@ -1053,8 +1147,11 @@ def converter_sentenca(sent):
         if is_inf and w["new_rel"] in {"PRED", "PRED_CO"}:
             w["new_rel"] = "OBJ" if w["new_rel"] == "PRED" else "OBJ_CO"
 
-    return {"text": sent.text, "words": words}
+        # Checagem final contra loops auto-referenciais (ID == HEAD)
+        if str(w.get("new_head")) == str(w.get("id")):
+            w["new_head"] = 0
 
+    return {"text": sent.text, "words": words}
 
 def gerar_agdt_xml(sentences):
     root = ET.Element("treebank")
