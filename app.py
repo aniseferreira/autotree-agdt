@@ -560,12 +560,24 @@ def aplicar_artigos_repetidos(words):
 
 
 def aplicar_auxiliares_especiais(words):
-    for w in words:
-        text = normalizar(w["text"])
-        if text in {"ἄν", "ἂν", "αν"} and w["deprel"] == "advmod": w["new_rel"] = "AuxY"
-        elif text in {"καί", "καὶ"} and w["deprel"] == "advmod": w["new_rel"] = "AuxZ"
-        elif text in {"γὰρ", "γαρ", "μὲν", "μεν", "δέ", "δε"} and w["deprel"] == "advmod": w["new_rel"] = "AuxY"
+    # 1. Localiza o predicado principal da oração (PRED) ou o verbo principal
+    pred_word = next(
+        (w for w in words if w.get("new_rel") == "PRED" or w.get("upos") in {"VERB", "AUX"}), 
+        None
+    )
 
+    for w in words:
+        text = normalizar(w["text"]).strip("’'")
+        
+        # Partículas modais e conectivas oracionais (AuxY) -> Devem apontar para o PRED
+        if text in {"ἄν", "αν", "γάρ", "γαρ", "μέν", "δὲ" "μεν", "δέ", "δε", "δ"}:
+            w["new_rel"] = "AuxY"
+            if pred_word and not w.get("lock"):
+                w["new_head"] = pred_word["id"]
+        
+        # Partículas de ênfase (AuxZ) -> Mantêm o head original no elemento que enfatizam
+        elif text in {"καί", "και", "καὶ"} and w.get("deprel") == "advmod":
+            w["new_rel"] = "AuxZ"
 
 def aplicar_participios_substantivados(words):
     for w in words:
@@ -986,6 +998,42 @@ def aplicar_coordenacao_sujeito_neutro(words):
                     adj1["lock"] = True
                     adj2["lock"] = True
 
+def aplicar_ocomp_participio(words):
+    """
+    Identifica particípios em acusativo que concordam com o objeto direto (OBJ) 
+    de verbos de percepção/cognição/factitivos, atribuindo-lhes a relação OCOMP.
+    """
+    for w in words:
+        if w.get("lock"):
+            continue
+
+        xpos = w.get("xpos") or ""
+        feats = w.get("feats") or ""
+        is_participle = "VerbForm=Part" in feats or (len(xpos) > 2 and xpos[2] == "p")
+
+        # Verifica se o particípio está no acusativo ('a')
+        if is_participle and extrair_caso(w) == "a":
+            head_verb = get_word(words, w.get("new_head") or w.get("head"))
+            
+            # Se a cabeça é um verbo ou infinitivo
+            if head_verb and head_verb.get("upos") in {"VERB", "AUX"}:
+                # Busca um objeto (OBJ) dependente do mesmo verbo que também esteja no acusativo
+                obj_alvo = next(
+                    (
+                        obj for obj in words 
+                        if (obj.get("new_head") == head_verb["id"] or obj.get("head") == head_verb["id"])
+                        and obj.get("new_rel") == "OBJ"
+                        and extrair_caso(obj) == "a"
+                        and obj["id"] != w["id"]
+                    ),
+                    None
+                )
+
+                if obj_alvo:
+                    w["new_rel"] = "OCOMP"
+                    w["new_head"] = head_verb["id"]  # Fica subordinado ao verbo regente (ex: ἰδεῖν)
+                    w["lock"] = True
+
 
 def converter_sentenca(sent):
     words = construir_words(sent)
@@ -1006,6 +1054,7 @@ def converter_sentenca(sent):
     
     aplicar_regras_infinitivo(words)
     aplicar_participios_substantivados(words)
+    aplicar_ocomp_participio(words)  # <-- Adicione aqui
     aplicar_copula(words)
     
     aplicar_coordenacao(words)
