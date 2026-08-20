@@ -1084,6 +1084,22 @@ def aplicar_focalizadores_auxz_generico(words):
             if deprel_original in {"advmod", "cc", "amod"}:
                 w["new_rel"] = "AuxZ"
 
+def sanar_nos_orfaos(words):
+    # Localiza a raiz/predicado principal para ancorar nós orfãos
+    predicado_principal = next((w for w in words if w.get("new_rel") in {"COORD", "PRED", "PRED_CO"}), None)
+    if not predicado_principal:
+        return
+
+    for w in words:
+        # Corrige auto-referência
+        if str(w.get("new_head")) == str(w.get("id")):
+            w["new_head"] = predicado_principal["id"]
+            
+        # Resgata nós sem pai que não sejam raízes legítimas
+        elif (w.get("new_head") is None or w.get("new_head") == 0) and w.get("new_rel") not in {"COORD", "PRED", "AuxK"}:
+            w["new_head"] = predicado_principal["id"]
+
+
 def converter_sentenca(sent):
     words = construir_words(sent)
     
@@ -1091,7 +1107,7 @@ def converter_sentenca(sent):
     sanitizar_morfologia_stanza(words) 
     inicializar_agdt(words)
 
-    # 2. Resolução do Escopo Nominal e Adverbial
+    # 2. Resolução Nominal e Adverbial
     desconstruir_atribuicoes_sem_concordancia(words)
     aplicar_infinitivo_substantivado_artigo(words)
     aplicar_artigos_repetidos(words)
@@ -1107,27 +1123,25 @@ def converter_sentenca(sent):
     aplicar_ocomp_participio(words)
     aplicar_copula(words)
 
-    # 4. Coordenação e Partículas Correlativas
-    aplicar_coordenacao_predicados_generico(words) # Promove orações a PRED_CO / COORD
-    aplicar_coordenacao(words)                    # Trata elementos nominais/secundários (conj)
+    # 4. Coordenação Genérica e Partículas
+    aplicar_coordenacao_predicados_generico(words)
+    aplicar_coordenacao(words)
     aplicar_oute_correlativo(words)
     aplicar_conectivos_correlativos(words)
     
-    # 5. Inversão de Preposições e Ajuste de Partículas/Focalizadores
-    aplicar_auxp_generico(words)                  # Substitui o aplicar_auxp antigo
-    aplicar_focalizadores_auxz_generico(words)     # Classifica partículas nominais residuais como AuxZ
+    # 5. Sintagmas Preposicionais e Focalizadores Nominais
+    aplicar_auxp_generico(words)
+    aplicar_focalizadores_auxz_generico(words)
     aplicar_auxiliares_especiais(words)
 
-    # 6. Sanitização de Árvore e Trava Anti-Loop
+    # 6. Sanitização da Árvore e Resgate de Órfãos
     sanitizar_arvore_agdt(words)
+    sanar_nos_orfaos(words)
 
-    # 7. Preenchimento Final e Tratamento de Resíduos
+    # 7. Preenchimento Final e Atribuições Finais
     for w in words:
-        if w.get("lock"):
-            continue
-
         if w.get("new_head") is None: 
-            w["new_head"] = w["head"]
+            w["new_head"] = w.get("head", 0)
             
         if w.get("new_rel") is None or w["new_rel"] in {"nmod", "amod", "advmod", "obj", "nsubj"}: 
             w["new_rel"] = mapear_relacao_basica(w)
@@ -1135,7 +1149,7 @@ def converter_sentenca(sent):
         if w.get("new_rel") == "AuxK": 
             w["new_head"] = 0
 
-        # Tratamento especial de infinitivos residuais
+        # Mapeamento de infinitivos residuais
         xpos = w.get("xpos") or ""
         feats = w.get("feats") or ""
         is_inf = "VerbForm=Inf" in feats or (len(xpos) > 4 and xpos[4] == "n") or (len(xpos) > 2 and xpos[2] == "n")
@@ -1143,23 +1157,9 @@ def converter_sentenca(sent):
         if is_inf and w["new_rel"] in {"PRED", "PRED_CO"}:
             w["new_rel"] = "OBJ" if w["new_rel"] == "PRED" else "OBJ_CO"
 
-        # Checagem final contra loops auto-referenciais (ID == HEAD)
+        # Trava anti-loop final
         if str(w.get("new_head")) == str(w.get("id")):
             w["new_head"] = 0
-
-def sanar_nos_orfaos(words):
-    predicado_principal = next((w for w in words if w.get("new_rel") in {"PRED", "PRED_CO", "COORD"}), None)
-    if not predicado_principal:
-        return
-
-    for w in words:
-        # Se um nó está apontando para si mesmo ou para o nó 0 sem ser COORD/PRED/AuxK
-        if str(w.get("new_head")) == str(w.get("id")):
-            w["new_head"] = predicado_principal["id"]
-            
-        # Se um elemento não-raiz não tem pai (orfão flutuante)
-        elif w.get("new_head") == 0 and w.get("new_rel") not in {"COORD", "PRED", "AuxK"}:
-            w["new_head"] = predicado_principal["id"]
 
     return {"text": sent.text, "words": words}
 
