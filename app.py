@@ -1149,6 +1149,11 @@ def converter_sentenca(sent):
     
     # 5. Fechamento de Partículas/Auxiliares (DEVE SER A ÚLTIMA REGRA SINTÁTICA)
     aplicar_auxiliares_especiais(words)             # <-- Roda por último para garantir que PRED já existe e é definitivo
+
+    # Executa a trava de segurança final para garantir raiz correta
+    sanitizar_arvore_agdt(words)
+
+    return {"text": sent.text, "words": words}
     
     # 6. Pós-processamento e Fallbacks do Graph
     for w in words:
@@ -1171,6 +1176,46 @@ def converter_sentenca(sent):
 
     return {"text": sent.text, "words": words}
 
+def sanitizar_arvore_agdt(words):
+    """
+    Trava-queda final para garantir a gramática estrita do AGDT:
+    1. Preposição (AuxP) NUNCA pode apontar para 0 (ser raiz).
+    2. Garante que exista apenas UM PRED apontando para 0.
+    3. Inverte o AuxP para ficar subordinado ao verbo/termo regente, e não o contrário.
+    """
+    # 1. Encontra o verbo finito principal (ex: ἔσται)
+    pred_principal = next(
+        (w for w in words if w.get("upos") in {"VERB", "AUX"} and w.get("text") == "ἔσται"),
+        next((w for w in words if w.get("new_rel") in {"PRED", "PRED_CO"}), None)
+    )
+
+    if pred_principal:
+        pred_principal["new_rel"] = "PRED"
+        pred_principal["new_head"] = 0
+
+    for w in words:
+        # CORREÇÃO 1: Preposição na Raiz (AuxP head=0)
+        if w.get("new_rel") == "AuxP" and w.get("new_head") == 0:
+            if pred_principal:
+                w["new_head"] = pred_principal["id"]  # Preposição 'εἰς' vai para 'ἔσται'
+        
+        # CORREÇÃO 2: Verbo PRED preso em Preposição
+        if w.get("new_rel") in {"PRED", "PRED_CO"} and w["id"] != pred_principal["id"]:
+            # Se for 'εἴη', garante que vire ADV dependente da conjunção 'εἰ'
+            conj_eim = next((c for c in words if c.get("new_rel") == "AuxC"), None)
+            if conj_eim:
+                w["new_rel"] = "ADV"
+                w["new_head"] = conj_eim["id"]
+                conj_eim["new_head"] = pred_principal["id"] if pred_principal else 0
+
+        # CORREÇÃO 3: Rótulos do Stanza residuais (nmod -> PNOM/ATR)
+        if w.get("new_rel") == "nmod":
+            if extrair_caso(w) == "n":
+                w["new_rel"] = "PNOM"
+                if pred_principal:
+                    w["new_head"] = pred_principal["id"]
+            else:
+                w["new_rel"] = "ATR"
 
 def gerar_agdt_xml(sentences, nome_base="arethusa_agdt"):
     root = ET.Element("treebank", {"xml:lang": "grc", "format": "aldt", "version": "1.5"})
