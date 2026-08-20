@@ -1217,33 +1217,45 @@ def sanitizar_arvore_agdt(words):
             else:
                 w["new_rel"] = "ATR"
 
-def gerar_agdt_xml(sentences, nome_base="arethusa_agdt"):
-    root = ET.Element("treebank", {"xml:lang": "grc", "format": "aldt", "version": "1.5"})
-    for i, sent in enumerate(sentences, start=1):
-        sentence = ET.SubElement(root, "sentence", {"id": str(i), "document_id": nome_base, "subdoc": "", "span": ""})
-        for w in sent["words"]:
-            if w.get("artificial"):
-                attrs = {
-                    "id": str(w["id"]),
-                    "insertion_id": w.get("insertion_id", "0003e"),
-                    "artificial": "elliptic",
-                    "relation": w["new_rel"],
-                    "form": w["text"],
-                    "head": str(w["new_head"]),
-                }
-            else:
-                attrs = {
-                    "id": str(w["id"]),
-                    "form": w["text"],
-                    "lemma": w["lemma"],
-                    "postag": w["xpos"],
-                    "head": str(w["new_head"]),
-                    "relation": w["new_rel"]
-                }
-            ET.SubElement(sentence, "word", attrs)
+def gerar_agdt_xml(sentences):
+    root = ET.Element("treebank")
 
+    for sent_idx, sent_data in enumerate(sentences, 1):
+        doc_elem = ET.SubElement(
+            root, 
+            "sentence", 
+            id=str(sent_idx), 
+            document_id="arethusa_agdt", 
+            subdoc="", 
+            span=""
+        )
+
+        for w in sent_data["words"]:
+            # Sanitização estrita de head e relation para o XML
+            raw_head = w.get("new_head")
+            if raw_head is None:
+                raw_head = w.get("head", 0)
+            
+            raw_rel = w.get("new_rel")
+            if not raw_rel:
+                raw_rel = w.get("deprel", "UNDEF")
+
+            # Converte explicitamente tudo para string pura e tratada
+            head_str = str(int(raw_head)) if isinstance(raw_head, (int, float)) else str(raw_head)
+            rel_str = str(raw_rel)
+
+            ET.SubElement(doc_elem, "word", {
+                "id": str(w["id"]),
+                "form": str(w.get("text", "")),
+                "lemma": str(w.get("lemma", "")),
+                "postag": str(w.get("postag", "")),
+                "head": head_str,
+                "relation": rel_str
+            })
+
+    # Serialização limpa
     xml_bytes = ET.tostring(root, encoding="utf-8")
-    return minidom.parseString(xml_bytes).toprettyxml(indent="  ", encoding="utf-8").decode("utf-8")
+    return xml_bytes
 
 
 def gerar_conllu(doc):
