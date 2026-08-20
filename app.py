@@ -1151,8 +1151,22 @@ def converter_sentenca(sent):
 
     # Executa a trava de segurança final para garantir raiz correta
     sanitizar_arvore_agdt(words)
-    ajustar_dependencias_finais(words) # <-- Adicione esta linha no final
+    ajustar_dependencias_finais(words)
 
+    for w in words:
+        if w.get("lock"):
+            continue
+
+        if w["new_head"] is None: 
+            w["new_head"] = w["head"]
+            
+        if w["new_rel"] is None or w["new_rel"] in {"nmod", "amod", "advmod", "obj", "nsubj"}: 
+            w["new_rel"] = mapear_relacao_basica(w)
+
+        if w["new_rel"] == "AuxK": 
+            w["new_head"] = 0
+
+    # O ÚNICO return com sent.text fica aqui:
     return {"text": sent.text, "words": words}
     
     # 6. Pós-processamento e Fallbacks do Graph
@@ -1199,7 +1213,6 @@ def ajustar_dependencias_finais(words):
         if w.get("new_rel") == "AuxK":
             w["new_head"] = 0
 
-    return {"text": sent.text, "words": words}
 
 def sanitizar_arvore_agdt(words):
     """
