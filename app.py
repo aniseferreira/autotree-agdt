@@ -1,14 +1,7 @@
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
-
-def formatar_xml_pretty(root_element):
-    """Converte o ElementTree em uma string XML formatada com quebras de linha e identação."""
-    raw_string = ET.tostring(root_element, encoding="utf-8")
-    parsed = minidom.parseString(raw_string)
-    return parsed.toprettyxml(indent="  ")
-
-import unicodedata
 import streamlit as st
 import stanza
 
@@ -322,7 +315,6 @@ def aplicar_auxp(words):
         if governed is None: 
             continue
             
-        # Proteção: Preposição NUNCA governa o verbo principal da oração
         if governed["upos"] in {"VERB", "AUX"}:
             continue
 
@@ -352,7 +344,6 @@ def aplicar_auxc(words):
         if subordinate is None: 
             continue
 
-        # Se o Stanza apontou o AuxC para um nome (ex: οἰκέτης), resgata o verbo da oração
         if subordinate["upos"] not in {"VERB", "AUX"}:
             verb_candidate = next(
                 (w for w in words[conj["id"]:] if w["upos"] in {"VERB", "AUX"}), 
@@ -361,7 +352,6 @@ def aplicar_auxc(words):
             if verb_candidate:
                 subordinate = verb_candidate
 
-        # Inverte: Conjunção pega a cabeça do verbo, Verbo passa a depender da Conjunção
         conj["new_head"] = subordinate.get("new_head") or subordinate["head"]
         subordinate["new_head"] = conj["id"]
 
@@ -384,7 +374,6 @@ def aplicar_oute_correlativo(words):
 
 
 def resolver_predicados_excedentes(words):
-    # 1. Varredura de segurança: Rebaixa PREDs que estão sob AuxC (integrante vs adverbial)
     for w in words:
         head_word = get_word(words, w["new_head"])
         if head_word and head_word.get("new_rel") == "AuxC":
@@ -397,33 +386,27 @@ def resolver_predicados_excedentes(words):
                 )
                 w["new_rel"] = "OBJ" if is_integrante else "ADV"
 
-    # 2. Coleta os PREDs restantes
     preds = [w for w in words if w["new_rel"] == "PRED"]
     if len(preds) <= 1:
         return
 
-    # Define o PRED principal (prefere o que já está apontando para a raiz 0)
     main_pred = next((p for p in preds if p["new_head"] == 0), preds[-1])
 
-    # 3. Trata os PREDs excedentes
     for p in preds:
         if p["id"] == main_pred["id"]:
             continue
             
         deprel = p.get("deprel", "")
-        # Se houver indício de coordenação entre os PREDs
         if deprel.startswith("conj") or any(w.get("deprel", "").startswith("cc") for w in words):
             p["new_rel"] = "PRED_CO"
             main_pred["new_rel"] = "PRED_CO"
         else:
-            # Rebaixa para oração subordinada/adverbial
             p["new_rel"] = "ADV"
             p["new_head"] = main_pred["id"]
 
 
 def aplicar_copula(words):
     for cop in words:
-        # Captura tanto o rótulo 'cop' do UD quanto os lemas de ligação
         is_copula_lemma = limpar_diacriticos(cop.get("lemma") or cop.get("text")) in {"ειμι", "γιγνομαι"}
         if cop["new_rel"] != "cop" and not (is_copula_lemma and cop.get("upos") in {"VERB", "AUX"}):
             continue
@@ -519,7 +502,6 @@ def aplicar_auxv(words):
 
 
 def tratar_oracoes_relativas_substantivas(words):
-    """Garante que pronomes relativos substantivados sejam devidamente estruturados."""
     for w in words:
         if w["lemma"] in {"ὁ", "ὅς"} and extrair_caso(w) == "a":
             ti_word = next((x for x in words if x["id"] == w["id"] + 1 and x["lemma"] in {"τις", "τίς"}), None)
@@ -605,7 +587,6 @@ def aplicar_artigos_repetidos(words):
 
 
 def aplicar_auxiliares_especiais(words):
-    # Procura o predicado principal (PRED ou PRED_CO)
     pred_word = next(
         (w for w in words if w.get("new_rel") in {"PRED", "PRED_CO"}), 
         None
@@ -614,14 +595,12 @@ def aplicar_auxiliares_especiais(words):
         pred_word = next((w for w in words if w.get("upos") in {"VERB", "AUX"}), None)
 
     for w in words:
-        # Remove apóstrofos e diacríticos para tratar δʼ, δ’, δέ, etc.
         text_clean = limpar_diacriticos(w["text"]).strip("’'\'\"")
         
-        # Partículas oracionais (AuxY) -> Devem subir para o PRED
         if text_clean in {"αν", "γαρ", "μεν", "δε", "δ"}:
             w["new_rel"] = "AuxY"
             if pred_word and not w.get("lock"):
-                w["new_head"] = pred_word["id"]  # Redireciona head para o verbo PRED
+                w["new_head"] = pred_word["id"]
         
         elif text_clean == "και" and w.get("deprel") == "advmod":
             w["new_rel"] = "AuxZ"
@@ -651,7 +630,6 @@ def aplicar_participios_substantivados(words):
 
 
 def reestruturar_predicativo_objeto(words):
-    """Refaz a estrutura da oração com o verbo ποιοῦσι e protege os nós contra a regra de coordenação."""
     verbo = next((w for w in words if w.get("xpos") == "v3ppia---" or w.get("lemma") in {"ποιέω", "ποιῶ"}), None)
     if not verbo:
         return
@@ -749,7 +727,6 @@ def aplicar_regras_infinitivo(words):
 
 
 def resolver_sujeito_passivo_neutro(words):
-    """Garante que pronomes/substantivos neutros ligados a verbos passivos sejam SBJ, não OBJ."""
     for w in words:
         xpos = w.get("xpos") or ""
         is_passive = w["upos"] in {"VERB", "AUX"} and len(xpos) > 2 and xpos[2] == "p"
@@ -764,10 +741,6 @@ def resolver_sujeito_passivo_neutro(words):
 
 
 def aplicar_regra_verbos_factitivos(words):
-    """
-    Trata verbos factitivos (ποιέω/ποιῶ) que exigem Objeto + Predicativo (OCOMP),
-    além de reestruturar particípios substantivados.
-    """
     for w in words:
         is_participle = "v-p" in w.get("xpos", "") or (w.get("upos") == "VERB" and "VerbForm=Part" in w.get("feats", ""))
         if is_participle and extrair_caso(w) == "a":
@@ -796,9 +769,6 @@ def aplicar_regra_verbos_factitivos(words):
 
 
 def tratar_adverbios_cristalizados_e_sintagmaticos(words):
-    """
-    Identifica e converte formas nominais/adjetivas com função adverbial (ADV).
-    """
     for i, w in enumerate(words):
         texto = w.get("text", "").lower()
         
@@ -844,12 +814,7 @@ def tratar_adverbios_cristalizados_e_sintagmaticos(words):
 
 
 def garantir_predicado_raiz(words):
-    """
-    Para orações nominais sem verbo finito: insere um nó artificial [0] (εἰμί) 
-    como PRED na raiz (head=0).
-    """
     tem_pred = any(w.get("new_rel") == "PRED" for w in words)
-    
     tem_verbo_finito = any(
         "v" in w.get("xpos", "")[:1] and w.get("xpos", "")[4:5] in {"i", "s", "o", "m"}
         for w in words
@@ -857,7 +822,6 @@ def garantir_predicado_raiz(words):
 
     if not tem_pred and not tem_verbo_finito:
         novo_id = str(len(words) + 1)
-        
         no_artificial = {
             "id": novo_id,
             "text": "[0]",
@@ -885,10 +849,7 @@ def garantir_predicado_raiz(words):
 
 
 def aplicar_estrutura_aci_e_disjuncao(words):
-    """
-    Trata orações de Acusativo com Infinitivo (AcI) e coordenação disjuntiva (ἤ) 
-    baseando-se em lemas e formas em grego politônico.
-    """
+    """Trata orações AcI e coordenação disjuntiva (ἤ) em grego politônico puro."""
     no_artificial = next((w for w in words if w.get("is_artificial") or w.get("form") == "[0]"), None)
     head_matriz = no_artificial["id"] if no_artificial else 0
 
@@ -903,7 +864,6 @@ def aplicar_estrutura_aci_e_disjuncao(words):
         δοκεῖν["new_head"] = head_matriz
         δοκεῖν["lock"] = True
         
-        # Infinitivo dependente (ἔχειν)
         ἔχειν = next(
             (w for w in words if normalizar(w.get("lemma")) == "εχω" 
              or normalizar(w.get("text")) == "εχειν"), 
@@ -914,7 +874,6 @@ def aplicar_estrutura_aci_e_disjuncao(words):
             ἔχειν["new_head"] = δοκεῖν["id"]
             ἔχειν["lock"] = True
 
-        # Sujeito acusativo (αὐτόν)
         αὐτόν = next(
             (w for w in words if normalizar(w.get("text")) in {"αυτον", "αυτην", "αυτο"}), 
             None
@@ -924,7 +883,6 @@ def aplicar_estrutura_aci_e_disjuncao(words):
             αὐτόν["new_head"] = δοκεῖν["id"]
             αὐτόν["lock"] = True
 
-        # Predicativo em acusativo (ἀγαθόν)
         ἀγαθόν = next(
             (w for w in words if normalizar(w.get("text")) in {"αγαθον", "αγαθην"}), 
             None
@@ -938,12 +896,10 @@ def aplicar_estrutura_aci_e_disjuncao(words):
     conjuncoes_η = [w for w in words if normalizar(w.get("text")) in {"η", "ητοι"}]
     
     if conjuncoes_η:
-        # A última conjunção assume a função COORD
         coord_disj = conjuncoes_η[-1]
         coord_disj["new_rel"] = "COORD"
         coord_disj["lock"] = True
         
-        # As conjunções anteriores viram AuxY dependentes da principal
         for η_aux in conjuncoes_η[:-1]:
             η_aux["new_rel"] = "AuxY"
             η_aux["new_head"] = coord_disj["id"]
@@ -959,10 +915,6 @@ def aplicar_estrutura_aci_e_disjuncao(words):
 
 
 def desconstruir_atribuicoes_sem_concordancia(words):
-    """
-    Remove atribuições do Stanza onde adjetivos/artigos são colocados como ATR
-    de palavras com as quais NÃO concordam em gênero/caso.
-    """
     for w in words:
         if w.get("lock"):
             continue
@@ -982,9 +934,6 @@ def desconstruir_atribuicoes_sem_concordancia(words):
 
 
 def aplicar_infinitivo_substantivado_artigo(words):
-    """
-    Trata estruturas de Infinitivo Substantivado por artigo neutro (τὸ ... ἰδεῖν).
-    """
     for w in words:
         texto = w.get("text", "").lower()
         upos = w.get("upos", "")
@@ -1010,9 +959,6 @@ def aplicar_infinitivo_substantivado_artigo(words):
 
 
 def aplicar_coordenacao_sujeito_neutro(words):
-    """
-    Trata estruturas do tipo: πᾶν + ADJ1 + καὶ + ADJ2 (nominativo neutro).
-    """
     for i, w in enumerate(words):
         texto = w.get("text", "").lower()
         caso = extrair_caso(w)
@@ -1045,10 +991,6 @@ def aplicar_coordenacao_sujeito_neutro(words):
                     adj2["lock"] = True
 
 def aplicar_ocomp_participio(words):
-    """
-    Identifica particípios em acusativo que concordam com o objeto direto (OBJ) 
-    de verbos de percepção/cognição/factitivos, atribuindo-lhes a relação OCOMP.
-    """
     for w in words:
         if w.get("lock"):
             continue
@@ -1057,13 +999,10 @@ def aplicar_ocomp_participio(words):
         feats = w.get("feats") or ""
         is_participle = "VerbForm=Part" in feats or (len(xpos) > 2 and xpos[2] == "p")
 
-        # Verifica se o particípio está no acusativo ('a')
         if is_participle and extrair_caso(w) == "a":
             head_verb = get_word(words, w.get("new_head") or w.get("head"))
             
-            # Se a cabeça é um verbo ou infinitivo
             if head_verb and head_verb.get("upos") in {"VERB", "AUX"}:
-                # Busca um objeto (OBJ) dependente do mesmo verbo que também esteja no acusativo
                 obj_alvo = next(
                     (
                         obj for obj in words 
@@ -1077,28 +1016,13 @@ def aplicar_ocomp_participio(words):
 
                 if obj_alvo:
                     w["new_rel"] = "OCOMP"
-                    w["new_head"] = head_verb["id"]  # Fica subordinado ao verbo regente (ex: ἰδεῖν)
+                    w["new_head"] = head_verb["id"]
                     w["lock"] = True
-
-def limpar_diacriticos(texto):
-    import unicodedata
-    if not texto:
-        return ""
-    # Remove acentos e diacríticos para facilitar comparação (ex: καί / καὶ -> και)
-    return "".join(
-        c for c in unicodedata.normalize("NFD", texto)
-        if unicodedata.category(c) != "Mn"
-    ).lower()
 
 
 def aplicar_conectivos_correlativos(words):
-    """
-    Trata séries correlativas (καί... καί..., τε... τε..., μήτε... μήτε...).
-    O último conectivo assume a função COORD e os anteriores viram AuxY dependentes dele.
-    """
     conectivos = {"και", "τε", "μητε"}
     
-    # Encontra todas as ocorrências de conectivos pareados na sentença
     ocorrencias = [
         w for w in words 
         if limpar_diacriticos(w["text"]).strip("’'") in conectivos 
@@ -1106,7 +1030,6 @@ def aplicar_conectivos_correlativos(words):
     ]
 
     if len(ocorrencias) >= 2:
-        # Agrupa por lema/tipo de conectivo
         grupos = {}
         for o in ocorrencias:
             lemma_clean = limpar_diacriticos(o.get("lemma") or o.get("text"))
@@ -1114,15 +1037,67 @@ def aplicar_conectivos_correlativos(words):
 
         for lemma, lista in grupos.items():
             if len(lista) >= 2:
-                # O último da série assume COORD
                 coord_principal = lista[-1]
                 coord_principal["new_rel"] = "COORD"
                 
-                # Os anteriores viram AuxY dependentes do último conectivo
                 for auxy in lista[:-1]:
                     auxy["new_rel"] = "AuxY"
                     auxy["new_head"] = coord_principal["id"]
                     auxy["lock"] = True
+
+
+def ajustar_dependencias_finais(words):
+    pred_principal = next((w for w in words if w.get("new_rel") == "PRED" and w.get("new_head") == 0), None)
+    
+    for w in words:
+        if not w.get("postag"):
+            w["postag"] = w.get("xpos") or w.get("feats") or "_"
+    
+        if limpar_diacriticos(w["text"]) in {"αχρηστος"} or w.get("new_rel") == "nmod":
+            w["new_rel"] = "PNOM"
+            if pred_principal:
+                w["new_head"] = pred_principal["id"]
+    
+        prep_eis = next((p for p in words if limpar_diacriticos(p["text"]) == "εις" and p.get("new_rel") == "AuxP"), None)
+        if prep_eis and w["id"] != prep_eis["id"]:
+            if w.get("new_head") == prep_eis.get("new_head") and w.get("new_rel") == "PNOM":
+                w["new_rel"] = "ADV"
+                w["new_head"] = prep_eis["id"]
+    
+        if w.get("new_rel") == "AuxK":
+            w["new_head"] = 0
+
+
+def sanitizar_arvore_agdt(words):
+    pred_principal = next(
+        (w for w in words if w.get("upos") in {"VERB", "AUX"} and w.get("text") == "ἔσται"),
+        next((w for w in words if w.get("new_rel") in {"PRED", "PRED_CO"}), None)
+    )
+
+    if pred_principal:
+        pred_principal["new_rel"] = "PRED"
+        pred_principal["new_head"] = 0
+
+    for w in words:
+        if w.get("new_rel") == "AuxP" and w.get("new_head") == 0:
+            if pred_principal:
+                w["new_head"] = pred_principal["id"]
+        
+        if w.get("new_rel") in {"PRED", "PRED_CO"} and w["id"] != pred_principal["id"]:
+            conj_eim = next((c for c in words if c.get("new_rel") == "AuxC"), None)
+            if conj_eim:
+                w["new_rel"] = "ADV"
+                w["new_head"] = conj_eim["id"]
+                conj_eim["new_head"] = pred_principal["id"] if pred_principal else 0
+
+        if w.get("new_rel") == "nmod":
+            if extrair_caso(w) == "n":
+                w["new_rel"] = "PNOM"
+                if pred_principal:
+                    w["new_head"] = pred_principal["id"]
+            else:
+                w["new_rel"] = "ATR"
+
 
 def converter_sentenca(sent):
     words = construir_words(sent)
@@ -1134,29 +1109,29 @@ def converter_sentenca(sent):
     # 2. Resolução do Escopo Nominal e Adverbial
     desconstruir_atribuicoes_sem_concordancia(words)
     aplicar_infinitivo_substantivado_artigo(words)
-    aplicar_artigos_repetidos(words)                 # <-- Mova para cá (ajusta substantivação/modificadores)
+    aplicar_artigos_repetidos(words)
     tratar_adverbios_cristalizados_e_sintagmaticos(words)
-    aplicar_auxp(words)                              # <-- Mova para cá (associa preposições antes das orações)
+    aplicar_auxp(words)
 
     # 3. Estruturas Verbais Cópulas e Núcleos
     aplicar_coordenacao_sujeito_neutro(words)
     aplicar_regra_verbos_factitivos(words)
     garantir_predicado_raiz(words)
     aplicar_regras_infinitivo(words)
-    aplicar_estrutura_aci_e_disjuncao(words)         # <-- Mova para ANTES das regras de partículas/coordenação
+    aplicar_estrutura_aci_e_disjuncao(words)
     aplicar_participios_substantivados(words)
     aplicar_ocomp_participio(words)
     aplicar_copula(words)
 
     # 4. Coordenação e Partículas Correlativas
     aplicar_coordenacao(words)
-    aplicar_oute_correlativo(words)                 # <-- Mova para ANTES da regra genérica
-    aplicar_conectivos_correlativos(words)          # <-- Regra genérica de καί...καί / τε...τε
+    aplicar_oute_correlativo(words)
+    aplicar_conectivos_correlativos(words)
     
-    # 5. Fechamento de Partículas/Auxiliares (DEVE SER A ÚLTIMA REGRA SINTÁTICA)
-    aplicar_auxiliares_especiais(words)             # <-- Roda por último para garantir que PRED já existe e é definitivo
+    # 5. Fechamento de Partículas/Auxiliares
+    aplicar_auxiliares_especiais(words)
 
-    # Executa a trava de segurança final para garantir raiz correta
+    # 6. Sanitização final de dependências
     sanitizar_arvore_agdt(words)
     ajustar_dependencias_finais(words)
 
@@ -1173,21 +1148,7 @@ def converter_sentenca(sent):
         if w["new_rel"] == "AuxK": 
             w["new_head"] = 0
 
-    # O ÚNICO return com sent.text fica aqui:
-    return {"text": sent.text, "words": words}
-    
-    # 6. Pós-processamento e Fallbacks do Graph
-    for w in words:
-        if w.get("lock"):
-            continue
-
-        if w["new_head"] is None: 
-            w["new_head"] = w["head"]
-        if w["new_rel"] is None: 
-            w["new_rel"] = w["deprel"]
-        if w["new_rel"] == "AuxK": 
-            w["new_head"] = 0
-
+        # Tratamento especial de infinitivos residuais
         xpos = w.get("xpos") or ""
         feats = w.get("feats") or ""
         is_inf = "VerbForm=Inf" in feats or (len(xpos) > 4 and xpos[4] == "n") or (len(xpos) > 2 and xpos[2] == "n")
@@ -1195,72 +1156,8 @@ def converter_sentenca(sent):
         if is_inf and w["new_rel"] in {"PRED", "PRED_CO"}:
             w["new_rel"] = "OBJ" if w["new_rel"] == "PRED" else "OBJ_CO"
 
-def ajustar_dependencias_finais(words):
-    pred_principal = next((w for w in words if w.get("new_rel") == "PRED" and w.get("new_head") == 0), None)
-    
-    for w in words:
-        # 1. Recupera postags perdidas
-        if not w.get("postag"):
-            w["postag"] = w.get("xpos") or w.get("feats") or "_"
-    
-        # 2. Corrigi ἄχρηστος (id=9): Deve ser PNOM de ἔσται
-        if limpar_diacriticos(w["text"]) in {"αχρηστος"} or w.get("new_rel") == "nmod":
-            w["new_rel"] = "PNOM"
-            if pred_principal:
-                w["new_head"] = pred_principal["id"]
-    
-        # 3. Corrigi ὑπηρεσίαν (id=11): Deve ser ADV subordinado à preposição εἰς (id=10)
-        prep_eis = next((p for p in words if limpar_diacriticos(p["text"]) == "εις" and p.get("new_rel") == "AuxP"), None)
-        if prep_eis and w["id"] != prep_eis["id"]:
-            if w.get("new_head") == prep_eis.get("new_head") and w.get("new_rel") == "PNOM":
-                w["new_rel"] = "ADV"
-                w["new_head"] = prep_eis["id"]
-    
-        # 4. Corrigi Ponto Final (AuxK): Sempre aponta para a raiz 0
-        if w.get("new_rel") == "AuxK":
-            w["new_head"] = 0
+    return {"text": sent.text, "words": words}
 
-
-def sanitizar_arvore_agdt(words):
-    """
-    Trava-queda final para garantir a gramática estrita do AGDT:
-    1. Preposição (AuxP) NUNCA pode apontar para 0 (ser raiz).
-    2. Garante que exista apenas UM PRED apontando para 0.
-    3. Inverte o AuxP para ficar subordinado ao verbo/termo regente, e não o contrário.
-    """
-    # 1. Encontra o verbo finito principal (ex: ἔσται)
-    pred_principal = next(
-        (w for w in words if w.get("upos") in {"VERB", "AUX"} and w.get("text") == "ἔσται"),
-        next((w for w in words if w.get("new_rel") in {"PRED", "PRED_CO"}), None)
-    )
-
-    if pred_principal:
-        pred_principal["new_rel"] = "PRED"
-        pred_principal["new_head"] = 0
-
-    for w in words:
-        # CORREÇÃO 1: Preposição na Raiz (AuxP head=0)
-        if w.get("new_rel") == "AuxP" and w.get("new_head") == 0:
-            if pred_principal:
-                w["new_head"] = pred_principal["id"]  # Preposição 'εἰς' vai para 'ἔσται'
-        
-        # CORREÇÃO 2: Verbo PRED preso em Preposição
-        if w.get("new_rel") in {"PRED", "PRED_CO"} and w["id"] != pred_principal["id"]:
-            # Se for 'εἴη', garante que vire ADV dependente da conjunção 'εἰ'
-            conj_eim = next((c for c in words if c.get("new_rel") == "AuxC"), None)
-            if conj_eim:
-                w["new_rel"] = "ADV"
-                w["new_head"] = conj_eim["id"]
-                conj_eim["new_head"] = pred_principal["id"] if pred_principal else 0
-
-        # CORREÇÃO 3: Rótulos do Stanza residuais (nmod -> PNOM/ATR)
-        if w.get("new_rel") == "nmod":
-            if extrair_caso(w) == "n":
-                w["new_rel"] = "PNOM"
-                if pred_principal:
-                    w["new_head"] = pred_principal["id"]
-            else:
-                w["new_rel"] = "ATR"
 
 def gerar_agdt_xml(sentences):
     root = ET.Element("treebank")
@@ -1276,7 +1173,6 @@ def gerar_agdt_xml(sentences):
         )
 
         for w in sent_data["words"]:
-            # Sanitização estrita de head e relation para o XML
             raw_head = w.get("new_head")
             if raw_head is None:
                 raw_head = w.get("head", 0)
@@ -1285,7 +1181,6 @@ def gerar_agdt_xml(sentences):
             if not raw_rel:
                 raw_rel = w.get("deprel", "UNDEF")
 
-            # Converte explicitamente tudo para string pura e tratada
             head_str = str(int(raw_head)) if isinstance(raw_head, (int, float)) else str(raw_head)
             rel_str = str(raw_rel)
 
@@ -1298,9 +1193,10 @@ def gerar_agdt_xml(sentences):
                 "relation": rel_str
             })
 
-    # Serialização limpa
-    xml_bytes = ET.tostring(root, encoding="utf-8")
-    return xml_bytes
+    # Serialização bonita (Pretty Print) para evitar linha horizontal infinita
+    raw_bytes = ET.tostring(root, encoding="utf-8")
+    parsed = minidom.parseString(raw_bytes)
+    return parsed.toprettyxml(indent="  ")
 
 
 def gerar_conllu(doc):
