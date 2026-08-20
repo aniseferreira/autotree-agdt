@@ -996,76 +996,72 @@ def sanitizar_arvore_agdt(words):
                 w["new_rel"] = "ATR"
 
 def aplicar_auxp_generico(words):
-    """
-    Inverte a dependência Prep -> Substantivo para Substantivo -> Prep (AuxP)
-    garantindo que não sejam criados ciclos (loops).
-    """
     for prep in words:
         if prep.get("upos") != "ADP":
             continue
 
         gov_id = prep.get("head")
         governed = get_word(words, gov_id)
-        if not governed:
+        if not governed or governed.get("upos") in {"VERB", "AUX"}:
             continue
 
-        # Evita preposição reger verbo diretamente
-        if governed.get("upos") in {"VERB", "AUX"}:
-            continue
-
-        # CHECAGEM ANTI-LOOP: Verifica se o governado já aponta para a preposição
+        # Se o governado já aponta para a preposição, desfazer o ciclo
         if str(governed.get("new_head", governed.get("head"))) == str(prep["id"]):
-            # O governado já apontava para a preposição; reatribui a mãe da preposição ao governado
-            prep["new_head"] = governed.get("head")
+            # O pai da preposição passa a ser o verbo/termo superior original
+            prep["new_head"] = prep.get("head")
             governed["new_head"] = prep["id"]
         else:
-            # Reversão padrão de dependência para AuxP
             prep["new_head"] = governed.get("new_head", governed.get("head"))
             governed["new_head"] = prep["id"]
 
-        # O termo regido assume a relação sintática interna do sintagma
-        governed["new_rel"] = "ATR" if governed.get("feats", "").find("Case=Gen") != -1 else "ADV"
+        # O termo regido não pode ser ATR de AuxP, assume a função sintática interna (ATR ou ADV)
+        case_attr = governed.get("feats", "")
+        governed["new_rel"] = "ATR" if "Case=Gen" in case_attr else "ADV"
         prep["new_rel"] = "AuxP"
 
+def eh_predicado_potencial(w):
+    upos = w.get("upos", "")
+    feats = w.get("feats", "")
+    xpos = w.get("xpos", "")
+    
+    if upos in {"VERB", "AUX"}:
+        if "VerbForm=Inf" not in feats and "VerbForm=Part" not in feats:
+            return True
+            
+    # Trata 'χρή' e similares (expressões impessoais com infinitivo dependente)
+    if "Person=3" in feats or (len(xpos) > 2 and xpos[2] == "3"):
+        return True
+        
+    return False
 
 def aplicar_coordenacao_predicados_generico(words):
-    """
-    Identifica múltiplos predicados principais e promove a conjunção/partícula
-    coordenativa intermediária a COORD (raiz), transformando os verbos em PRED_CO.
-    """
-    # 1. Encontra todos os verbos finitos principais
-    verbos_finitos = [
-        w for w in words
-        if w.get("upos") in {"VERB", "AUX"}
-        and "VerbForm=Inf" not in (w.get("feats") or "")
-        and "VerbForm=Part" not in (w.get("feats") or "")
-    ]
+    predicados = [w for w in words if eh_predicado_potencial(w)]
 
-    if len(verbos_finitos) < 2:
+    if len(predicados) < 2:
         return
 
-    # 2. Procura a conjunção ou partícula coordenativa (CCONJ ou PART de coordenação) situada entre os verbos
-    v1, v2 = verbos_finitos[0], verbos_finitos[1]
+    v1, v2 = predicados[0], predicados[1]
+
+    # Localiza a partícula de coordenação (CCONJ ou PART) entre os dois predicados
     coord_node = next(
         (w for w in words 
-         if v1["id"] < w["id"] < v2["id"] 
-         and w.get("upos") in {"CCONJ", "PART"} 
-         and w.get("deprel", "").startswith("cc")),
+         if v1["id"] < w["id"] <= v2["id"] + 1
+         and (w.get("upos") in {"CCONJ", "PART"} or w.get("deprel", "").startswith("cc"))
+         and w.get("text", "").lower() not in {",", "."}),
         None
     )
 
     if coord_node:
         coord_node["new_rel"] = "COORD"
-        coord_node["new_head"] = 0  # Eleva a COORD para o topo/raiz
+        coord_node["new_head"] = 0
 
-        for v in verbos_finitos:
+        for v in predicados:
             v["new_rel"] = "PRED_CO"
             v["new_head"] = coord_node["id"]
 
-        # Partículas secundárias do mesmo tipo viram AuxY
+        # Partículas de apoio (como o primeiro δὲ) viram AuxY ligadas ao COORD
         for w in words:
-            if w["id"] != coord_node["id"] and w.get("upos") == coord_node.get("upos") and w.get("deprel", "").startswith("cc"):
-                w["new_rel"] = "AuxY"
+            if w["id"] != coord_node["id"] and w.get("upos") in {"CCONJ", "PART"} and w.get("new_rel") == "AuxY":
                 w["new_head"] = coord_node["id"]
 
 def aplicar_focalizadores_auxz_generico(words):
@@ -1150,6 +1146,20 @@ def converter_sentenca(sent):
         # Checagem final contra loops auto-referenciais (ID == HEAD)
         if str(w.get("new_head")) == str(w.get("id")):
             w["new_head"] = 0
+
+def sanar_nos_orfaos(words):
+    predicado_principal = next((w for w in words if w.get("new_rel") in {"PRED", "PRED_CO", "COORD"}), None)
+    if not predicado_principal:
+        return
+
+    for w in words:
+        # Se um nó está apontando para si mesmo ou para o nó 0 sem ser COORD/PRED/AuxK
+        if str(w.get("new_head")) == str(w.get("id")):
+            w["new_head"] = predicado_principal["id"]
+            
+        # Se um elemento não-raiz não tem pai (orfão flutuante)
+        elif w.get("new_head") == 0 and w.get("new_rel") not in {"COORD", "PRED", "AuxK"}:
+            w["new_head"] = predicado_principal["id"]
 
     return {"text": sent.text, "words": words}
 
