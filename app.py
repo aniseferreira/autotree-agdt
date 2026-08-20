@@ -1,6 +1,13 @@
 import re
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
+
+def formatar_xml_pretty(root_element):
+    """Converte o ElementTree em uma string XML formatada com quebras de linha e identação."""
+    raw_string = ET.tostring(root_element, encoding="utf-8")
+    parsed = minidom.parseString(raw_string)
+    return parsed.toprettyxml(indent="  ")
+
 import unicodedata
 import streamlit as st
 import stanza
