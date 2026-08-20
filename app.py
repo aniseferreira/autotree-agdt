@@ -879,77 +879,76 @@ def garantir_predicado_raiz(words):
 
 def aplicar_estrutura_aci_e_disjuncao(words):
     """
-    Trata orações de Acusativo com Infinitivo (AcI) dependentes de 'δοκεῖν',
-    além de estruturar a coordenação disjuntiva (ἤ) e os exemplificadores (οἷον).
+    Trata orações de Acusativo com Infinitivo (AcI) e coordenação disjuntiva (ἤ) 
+    baseando-se em lemas e formas em grego politônico.
     """
     no_artificial = next((w for w in words if w.get("is_artificial") or w.get("form") == "[0]"), None)
     head_matriz = no_artificial["id"] if no_artificial else 0
 
-    dokein = next((w for w in words if w.get("lemma") == "δοκέω" and ("v--p" in w.get("xpos", "") or w.get("text") in {"δοκεῖν", "δοκειν"})), None)
-    if dokein:
-        dokein["new_rel"] = "SBJ"
-        dokein["new_head"] = head_matriz
-        dokein["lock"] = True
+    # 1. Estrutura AcI (δοκεῖν / ἔχειν / αὐτόν / ἀγαθόν)
+    δοκεῖν = next(
+        (w for w in words if normalizar(w.get("lemma")) == "δοκεω" 
+         or normalizar(w.get("text")) in {"δοκειν", "δοκει"}), 
+        None
+    )
+    if δοκεῖν:
+        δοκεῖν["new_rel"] = "SBJ"
+        δοκεῖν["new_head"] = head_matriz
+        δοκεῖν["lock"] = True
         
-        echein = next((w for w in words if w.get("lemma") == "ἔχω" and ("v--p" in w.get("xpos", "") or w.get("text") in {"ἔχειν", "εχειν"})), None)
-        if echein:
-            echein["new_rel"] = "OBJ"
-            echein["new_head"] = dokein["id"]
-            echein["lock"] = True
+        # Infinitivo dependente (ἔχειν)
+        ἔχειν = next(
+            (w for w in words if normalizar(w.get("lemma")) == "εχω" 
+             or normalizar(w.get("text")) == "εχειν"), 
+            None
+        )
+        if ἔχειν:
+            ἔχειν["new_rel"] = "OBJ"
+            ἔχειν["new_head"] = δοκεῖν["id"]
+            ἔχειν["lock"] = True
 
-        auton = next((w for w in words if w.get("text") in {"αὐτὸν", "αυτον"}), None)
-        if auton:
-            auton["new_rel"] = "SBJ"
-            auton["new_head"] = dokein["id"]
-            auton["lock"] = True
+        # Sujeito acusativo (αὐτόν)
+        αὐτόν = next(
+            (w for w in words if normalizar(w.get("text")) in {"αυτον", "αυτην", "αυτο"}), 
+            None
+        )
+        if αὐτόν:
+            αὐτόν["new_rel"] = "SBJ"
+            αὐτόν["new_head"] = δοκεῖν["id"]
+            αὐτόν["lock"] = True
 
-        agathon = next((w for w in words if w.get("text") in {"ἀγαθὸν", "αγαθον"}), None)
-        if agathon:
-            agathon["new_rel"] = "PNOM"
-            agathon["new_head"] = head_matriz
-            agathon["lock"] = True
+        # Predicativo em acusativo (ἀγαθόν)
+        ἀγαθόν = next(
+            (w for w in words if normalizar(w.get("text")) in {"αγαθον", "αγαθην"}), 
+            None
+        )
+        if ἀγαθόν:
+            ἀγαθόν["new_rel"] = "PNOM"
+            ἀγαθόν["new_head"] = head_matriz
+            ἀγαθόν["lock"] = True
 
-    conj_eta_main = next((w for w in words if w.get("text") in {"ἤ", "η"} and str(w["id"]) == "10"), None)
-    echein = next((w for w in words if w.get("lemma") == "ἔχω"), None)
+    # 2. Coordenação Disjuntiva (ἤ ... ἤ)
+    conjuncoes_η = [w for w in words if normalizar(w.get("text")) in {"η", "ητοι"}]
     
-    if conj_eta_main and echein:
-        conj_eta_main["new_rel"] = "COORD"
-        conj_eta_main["new_head"] = echein["id"]
-        conj_eta_main["lock"] = True
+    if conjuncoes_η:
+        # A última conjunção assume a função COORD
+        coord_disj = conjuncoes_η[-1]
+        coord_disj["new_rel"] = "COORD"
+        coord_disj["lock"] = True
+        
+        # As conjunções anteriores viram AuxY dependentes da principal
+        for η_aux in conjuncoes_η[:-1]:
+            η_aux["new_rel"] = "AuxY"
+            η_aux["new_head"] = coord_disj["id"]
+            η_aux["lock"] = True
 
-        for id_w in ["7", "9", "11", "14"]:
-            w = get_word(words, id_w)
-            if w:
-                w["new_rel"] = "OBJ_CO"
-                w["new_head"] = conj_eta_main["id"]
-                w["lock"] = True
-
-        eta_aux = get_word(words, 8)
-        if eta_aux:
-            eta_aux["new_rel"] = "AuxY"
-            eta_aux["new_head"] = conj_eta_main["id"]
-            eta_aux["lock"] = True
-
-    conj_eta_app = next((w for w in words if w.get("text") in {"ἤ", "η"} and str(w["id"]) == "18"), None)
-    pathos = get_word(words, 14)
-    
-    if conj_eta_app and pathos:
-        conj_eta_app["new_rel"] = "COORD"
-        conj_eta_app["new_head"] = pathos["id"]
-        conj_eta_app["lock"] = True
-
-        oion = get_word(words, 16)
-        if oion:
-            oion["new_rel"] = "AuxZ"
-            oion["new_head"] = conj_eta_app["id"]
-            oion["lock"] = True
-
-        for id_w in ["17", "19"]:
-            w = get_word(words, id_w)
-            if w:
-                w["new_rel"] = "APOS_CO"
-                w["new_head"] = conj_eta_app["id"]
-                w["lock"] = True
+    # 3. Exemplificadores (οἷον)
+    οἷον = next((w for w in words if normalizar(w.get("text")) in {"οιον", "οια"}), None)
+    if οἷον:
+        οἷον["new_rel"] = "AuxZ"
+        if conjuncoes_η:
+            οἷον["new_head"] = conjuncoes_η[-1]["id"]
+        οἷον["lock"] = True
 
 
 def desconstruir_atribuicoes_sem_concordancia(words):
@@ -1152,6 +1151,7 @@ def converter_sentenca(sent):
 
     # Executa a trava de segurança final para garantir raiz correta
     sanitizar_arvore_agdt(words)
+    ajustar_dependencias_finais(words) # <-- Adicione esta linha no final
 
     return {"text": sent.text, "words": words}
     
