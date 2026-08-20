@@ -1034,6 +1034,49 @@ def aplicar_ocomp_participio(words):
                     w["new_head"] = head_verb["id"]  # Fica subordinado ao verbo regente (ex: ἰδεῖν)
                     w["lock"] = True
 
+def limpar_diacriticos(texto):
+    import unicodedata
+    if not texto:
+        return ""
+    # Remove acentos e diacríticos para facilitar comparação (ex: καί / καὶ -> και)
+    return "".join(
+        c for c in unicodedata.normalize("NFD", texto)
+        if unicodedata.category(c) != "Mn"
+    ).lower()
+
+
+def aplicar_conectivos_correlativos(words):
+    """
+    Trata séries correlativas (καί... καί..., τε... τε..., μήτε... μήτε...).
+    O último conectivo assume a função COORD e os anteriores viram AuxY dependentes dele.
+    """
+    conectivos = {"και", "τε", "μητε"}
+    
+    # Encontra todas as ocorrências de conectivos pareados na sentença
+    ocorrencias = [
+        w for w in words 
+        if limpar_diacriticos(w["text"]).strip("’'") in conectivos 
+        and w.get("upos") in {"CCONJ", "ADV"}
+    ]
+
+    if len(ocorrencias) >= 2:
+        # Agrupa por lema/tipo de conectivo
+        grupos = {}
+        for o in ocorrencias:
+            lemma_clean = limpar_diacriticos(o.get("lemma") or o.get("text"))
+            grupos.setdefault(lemma_clean, []).append(o)
+
+        for lemma, lista in grupos.items():
+            if len(lista) >= 2:
+                # O último da série assume COORD
+                coord_principal = lista[-1]
+                coord_principal["new_rel"] = "COORD"
+                
+                # Os anteriores viram AuxY dependentes do último conectivo
+                for auxy in lista[:-1]:
+                    auxy["new_rel"] = "AuxY"
+                    auxy["new_head"] = coord_principal["id"]
+                    auxy["lock"] = True
 
 def converter_sentenca(sent):
     words = construir_words(sent)
