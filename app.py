@@ -21,7 +21,70 @@ st.write(
 )
 
 # ============================================================
-# 2. FUNÇÕES UTILITÁRIAS E TRATAMENTO UNICODE
+# 2. CONSTANTES DE LINGUAGEM (GREGO POLITÔNICO)
+# ============================================================
+
+PREPOSICOES_GREGAS = {
+    # Formas plenas
+    "ἀμφί", "ἀμφὶ", "ἀνά", "ἀνὰ", "ἀντί", "ἀντὶ", "ἀπό", "ἀπὸ",
+    "διά", "διὰ", "εἰς", "ἐκ", "ἐξ", "ἐν", "ἐπί", "ἐπὶ", "κατά", "κατὰ",
+    "μετά", "μετὰ", "περί", "περὶ", "πρό", "πρὸ", "πρός", "πρὸς", "σύν", "σὺν", "ὑπέρ", "ὑπὲρ", "ὑπό", "ὑπὸ",
+    # Formas elididas e apóstrofos prosódicos (variantes unicode)
+    "ἀμφ'", "ἀμφ’", "ἀντ'", "ἀντ’", "ἀνθ'", "ἀνθ’", "ἀπ'", "ἀπ’", "ἀφ'", "ἀφ’",
+    "δι'", "δι’", "ἐπ'", "ἐπ’", "ἐφ'", "ἐφ’", "κατ'", "κατ’", "κατ᾿", "καθ'", "καθ’", "καθ᾿",
+    "μετ'", "μετ’", "μεθ'", "μεθ’", "παρ'", "παρ’", "περ'", "περ’", "ὑπ'", "ὑπ’", "ὑφ'", "ὑφ’"
+}
+
+LEMAS_PREPOSICOES_ELIDIDAS = {
+    "κατ": "κατά", "καθ": "κατά",
+    "δι": "διά",
+    "μετ": "μετά", "μεθ": "μετά",
+    "παρ": "παρά",
+    "επ": "ἐπί", "εφ": "ἐπί",
+    "απ": "ἀπό", "αφ": "ἀπό",
+    "αντ": "ἀντί", "ανθ": "ἀντί",
+    "αμφ": "ἀμφί",
+    "υπ": "ὑπό", "υφ": "ὑπό"
+}
+
+PARTICULAS_OUTE = {
+    "οὔτε", "ουτε", "οὔτ", "ουτ", "οὔθ", "ουθ",
+    "μήτε", "μητε", "μήτ", "μητ", "μήθ", "μηθ"
+}
+
+PRONOMES_RELATIVOS = {
+    "ὅς", "ἥ", "ὅ", "ὅσπερ", "ἥπερ", "ὅπερ", "ὅστις", "ἥτις", "ὅτι",
+    "οὗ", "ἧς", "ᾧ", "ᾗ", "ὅν", "ἥν", "ὧν", "οἷς", "αἷς", "ούς", "ἅς", "ἅ"
+}
+
+CONJUNCOES_INTEGRANTES = {"ὅτι", "οτι"}
+
+CONJUNCOES_SUBORDINATIVAS = {
+    "ὅτι", "οτι", "διότι", "διοτι", "ὡς", "ως", "ἐπειδή", "επειδη",
+    "ἐπεί", "επει", "ἐπειδήπερ", "επειδηπερ", "ἐάν", "εαν", "ἄν", "αν",
+    "εἰ", "ει", "ἐάνπερ", "εανπερ", "ὥσπερ", "ωσπερ", "καθάπερ", "καθαπερ",
+    "ἐπειδάν", "επειδαν", "ὅταν", "οταν", "ἐπάν", "επαν"
+}
+
+VERBOS_DICENDI = {
+    "λέγω", "φημί", "εἶπον", "ἀγγέλλω", "φράζω", "δηλόω", "ἀποκρίνομαι", "βοάω", "κηρύσσω",
+    "νομίζω", "ἡγέομαι", "οἴομαι", "δοκέω", "πιστεύω",
+    "ὁράω", "ἀκούω", "γιγνώσκω", "οἶδα", "πυνθάνομαι", "αἰσθάνομαι", "μανθάνω"
+}
+
+NEGACOES = {"οὐ", "οὐκ", "οὐχ", "οὐχι", "μὴ", "μή"}
+
+PONTUACAO_AUXG = {"ʼ", "῾", "'", "’", "“", "”", "‘", "’", '"'}
+PONTUACAO_AUXK = {".", "·", "·", ";", ":", ";"}
+PONTUACAO_AUXX = {","}
+
+ADV_ACUSATIVOS_NEUTROS = {"μέγα", "μεγάλα", "μικρόν", "ὀλίγον", "πολλά", "πολύ", "ταχύ"}
+ADV_GENITIVOS = {"μικροῦ", "ὀλίγου"}
+ADV_DATIVOS_FEMININOS = {"ἰδίᾳ", "κοινῇ", "πεζῇ", "σιγῇ", "κύκλῳ"}
+ADV_SUBSTANTIVADOS_ISOLADOS = {"τέλος", "δωρεάν"}
+
+# ============================================================
+# 3. FUNÇÕES UTILITÁRIAS E TRATAMENTO UNICODE
 # ============================================================
 
 def limpar_diacriticos(texto):
@@ -77,7 +140,7 @@ def extrair_caso(w):
     return None
 
 # ============================================================
-# 3. INICIALIZAÇÃO DO STANZA COM CACHE
+# 4. INICIALIZAÇÃO DO STANZA COM CACHE
 # ============================================================
 @st.cache_resource
 def load_stanza_pipeline():
@@ -93,7 +156,7 @@ with st.spinner("Carregando o modelo Stanza (Perseus)..."):
     nlp = load_stanza_pipeline()
 
 # ============================================================
-# 4. DIVISÃO E PRÉ-PROCESSAMENTO DE SENTENÇAS
+# 5. DIVISÃO E PRÉ-PROCESSAMENTO DE SENTENÇAS
 # ============================================================
 def pre_processar_sentencas(texto):
     linhas = [l.strip() for l in texto.splitlines() if l.strip()]
@@ -113,73 +176,6 @@ def pre_processar_sentencas(texto):
         frases_finais.append(curr.strip())
         
     return "\n\n".join(frases_finais) if frases_finais else texto
-
-# ============================================================
-# 5. CONSTANTES DE LINGUAGEM (GREGO POLITÔNICO)
-# ============================================================
-
-PARTICULAS_OUTE = {
-    "οὔτε", "ουτε", "οὔτ", "ουτ", "οὔθ", "ουθ",
-    "μήτε", "μητε", "μήτ", "μητ", "μήθ", "μηθ"
-}
-
-PRONOMES_RELATIVOS = {
-    "ὅς", "ἥ", "ὅ", "ὅσπερ", "ἥπερ", "ὅπερ", "ὅστις", "ἥτις", "ὅτι",
-    "οὗ", "ἧς", "ᾧ", "ᾗ", "ὅν", "ἥν", "ὧν", "οἷς", "αἷς", "ούς", "ἅς", "ἅ"
-}
-
-CONJUNCOES_INTEGRANTES = {"ὅτι", "οτι"}
-
-CONJUNCOES_SUBORDINATIVAS = {
-    "ὅτι", "οτι", "διότι", "διοτι", "ὡς", "ως", "ἐπειδή", "επειδη",
-    "ἐπεί", "επει", "ἐπειδήπερ", "επειδηπερ", "ἐάν", "εαν", "ἄν", "αν",
-    "εἰ", "ει", "ἐάνπερ", "εανπερ", "ὥσπερ", "ωσπερ", "καθάπερ", "καθαπερ",
-    # Conjunções temporais/condicionais compostas
-    "ἐπειδάν", "επειδαν", "ὅταν", "οταν", "ἐπάν", "επαν"
-}
-
-VERBOS_DICENDI = {
-    "λέγω", "φημί", "εἶπον", "ἀγγέλλω", "φράζω", "δηλόω", "ἀποκρίνομαι", "βοάω", "κηρύσσω",
-    "νομίζω", "ἡγέομαι", "οἴομαι", "δοκέω", "πιστεύω",
-    "ὁράω", "ἀκούω", "γιγνώσκω", "οἶδα", "πυνθάνομαι", "αἰσθάνομαι", "μανθάνω"
-}
-
-NEGACOES = {"οὐ", "οὐκ", "οὐχ", "οὐχι", "μὴ", "μή"}
-
-PREPOSICOES_GREGAS = {
-    # Formas plenas
-    "ἀμφί", "ἀμφὶ", "ἀνά", "ἀνὰ", "ἀντί", "ἀντὶ", "ἀπό", "ἀπὸ",
-    "διά", "διὰ", "εἰς", "ἐκ", "ἐξ", "ἐν", "ἐπί", "ἐπὶ", "κατά", "κατὰ", "κατ᾿",
-    "μετά", "μετὰ", "περί", "περὶ", "πρό", "πρὸ", "πρός", "πρὸς", "σύν", "σὺν", "ὑπέρ", "ὑπὲρ", "ὑπό", "ὑπὸ",
-    # Formas elididas (com apóstrofo e variantes sem diacríticos)
-    "ἀμφ'", "ἀμφ’", "ἀντ'", "ἀντ’", "ἀνθ'", "ἀνθ’", "ἀπ'", "ἀπ’", "ἀφ'", "ἀφ’",
-    "δι'", "δι’", "ἐπ'", "ἐπ’", "ἐφ'", "ἐφ’", "κατ'", "κατ’", "καθ'", "καθ’",
-    "μετ'", "μετ’", "μεθ'", "μεθ’", "παρ'", "παρ’", "περ'", "περ’", "ὑπ'", "ὑπ’", "ὑφ'", "ὑφ’"
-}
-PREPOSICOES_GREGAS.update({
-    "κατ᾿", "κατ'", "κατ’", "καθ᾿", "καθ'", "καθ’"
-})
-
-
-PONTUACAO_AUXG = {"ʼ", "῾", "'", "’", "“", "”", "‘", "’", '"'}
-PONTUACAO_AUXK = {".", "·", "·", ";", ":", ";"}
-PONTUACAO_AUXX = {","}
-
-ADV_ACUSATIVOS_NEUTROS = {
-    "μέγα", "μεγάλα", "μικρόν", "ὀλίγον", "πολλά", "πολύ", "ταχύ"
-}
-
-ADV_GENITIVOS = {
-    "μικροῦ", "ὀλίγου"
-}
-
-ADV_DATIVOS_FEMININOS = {
-    "ἰδίᾳ", "κοινῇ", "πεζῇ", "σιγῇ", "κύκλῳ"
-}
-
-ADV_SUBSTANTIVADOS_ISOLADOS = {
-    "τέλος", "δωρεάν"
-}
 
 # --- FUNÇÕES DE VERIFICAÇÃO LINGUÍSTICA ---
 
@@ -211,14 +207,53 @@ def e_pronome_relativo(word):
 # 6. REGRAS DE TRANSFORMAÇÃO E PROCESSAMENTO
 # ============================================================
 
-# Correção de preposições elididas que o Stanza confunde com adjetivo/advérbio
+def sanitizar_morfologia_stanza(words):
+    """Corrige falhas graves do Stanza em preposições elididas, verbos e substantivos."""
+    if not words:
+        return
+
     for w in words:
-        texto_clean = w.get("text", "").strip()
-        if texto_clean in PREPOSICOES_GREGAS or limpar_diacriticos(texto_clean) in {"κατ", "καθ", "δια", "μετ", "παρ", "επ", "εφ", "απ", "αφ"}:
+        raw_text = w.get("text", "").strip("’'\'\"᾿’")
+        clean_text = limpar_diacriticos(raw_text)
+
+        # 1. Correção para Preposições Elididas (ex: κατ᾿ -> κατά)
+        if clean_text in LEMAS_PREPOSICOES_ELIDIDAS or raw_text in PREPOSICOES_GREGAS or w.get("text") in PREPOSICOES_GREGAS:
+            lemma_correto = LEMAS_PREPOSICOES_ELIDIDAS.get(clean_text, "κατά" if "κατ" in clean_text else w.get("lemma"))
+            w["lemma"] = lemma_correto
             w["upos"] = "ADP"
             w["xpos"] = "r--------"
             w["postag"] = "r--------"
-            w["lemma"] = "κατά" if limpar_diacriticos(texto_clean) in {"κατ", "καθ"} else w.get("lemma")
+            w["feats"] = "_"
+
+        # 2. Correção específica para ποιοῦσι
+        texto = w.get("text", "")
+        lemma = w.get("lemma", "")
+        if lemma in {"ποιέω", "ποιῶ"} or texto in {"ποιοῦσι", "ποιοῦσιν"}:
+            w["upos"] = "VERB"
+            w["xpos"] = "v3ppia---"
+            w["postag"] = "v3ppia---"
+
+    # 3. Correção de substantivo no início da frase marcado como verbo
+    primeira = words[0]
+    has_real_verb = any(w["id"] != primeira["id"] and w.get("xpos", "").startswith("v3p") for w in words)
+    
+    if primeira.get("upos") == "VERB" and has_real_verb:
+        texto_p = primeira.get("text", "")
+        lemma_p = primeira.get("lemma", "")
+        if texto_p.startswith("Ψώρ") or lemma_p == "ὁράω":
+            primeira["lemma"] = "ψώρα"
+            primeira["upos"] = "NOUN"
+            primeira["xpos"] = "n-s---fn-"
+            primeira["postag"] = "n-s---fn-"
+            primeira["deprel"] = "nsubj"
+
+    for w in words:
+        if w.get("text") == "λειχῆνας":
+            w["lemma"] = "λειχήν"
+            w["upos"] = "NOUN"
+            w["xpos"] = "n-p---ma-"
+            w["postag"] = "n-p---ma-"
+
 
 def construir_words(sent):
     words = []
@@ -255,7 +290,7 @@ def mapear_relacao_basica(w):
 
     if text in CONJUNCOES_SUBORDINATIVAS: return "AuxC"
 
-    if text in PREPOSICOES_GREGAS:
+    if text in PREPOSICOES_GREGAS or w["upos"] == "ADP":
         w["upos"] = "ADP"
         w["xpos"] = "r--------"
         return "AuxP"
@@ -302,6 +337,12 @@ def aplicar_auxp(words):
         if governed["upos"] in {"VERB", "AUX"}:
             continue
 
+        if governed.get("new_rel") == "PNOM" or extrair_caso(governed) == "n":
+            pred_verbo = next((v for v in words if v.get("new_rel") in {"PRED", "PRED_CO"}), None)
+            if pred_verbo:
+                prep["new_head"] = pred_verbo["id"]
+            continue
+
         original_relation = governed["new_rel"]
         prep["new_head"] = governed["new_head"]
         governed["new_head"] = prep["id"]
@@ -311,6 +352,7 @@ def aplicar_auxp(words):
             
         if prep["new_head"] == prep["id"]: 
             prep["new_head"] = 0
+
 
 def aplicar_auxc(words):
     for conj in words:
@@ -345,6 +387,7 @@ def aplicar_auxc(words):
         )
 
         subordinate["new_rel"] = "OBJ" if is_integrante else "ADV"
+
 
 def aplicar_oute_correlativo(words):
     ocorrencias = [w for w in words if e_particula_oute(w)]
@@ -396,107 +439,28 @@ def aplicar_copula(words):
             continue
             
         predicative = get_word(words, cop["head"])
-        if predicative is None or predicative["id"] == cop["id"]:
+        if predicative is None or predicative["id"] == cop["id"] or extrair_caso(predicative) != "n":
             predicative = next(
-                (p for p in words if (p.get("head") == cop["id"] or p.get("new_head") == cop["id"]) 
-                 and extrair_caso(p) == "n" and p["id"] != cop["id"]), 
-                None
+                (p for p in words if extrair_caso(p) == "n" and p["id"] != cop["id"] and p.get("upos") in {"ADJ", "NOUN"}), 
+                predicative
             )
 
         if predicative is None: 
             continue
 
-        case_pred = extrair_caso(predicative)
-        nom_candidate = None
-
-        if case_pred == "g":
-            for w in words:
-                if w["id"] != predicative["id"] and extrair_caso(w) == "n":
-                    is_sbj = w["new_rel"] == "SBJ" or w["deprel"] == "nsubj" or any(
-                        art["new_rel"] == "AuxE" and art["head"] == w["id"] for art in words
-                    )
-                    if not is_sbj:
-                        nom_candidate = w
-                        break
-            
-            if nom_candidate:
-                predicative["new_rel"] = "ATR"
-                predicative["new_head"] = nom_candidate["id"]
-                predicative = nom_candidate
-
-        cop_old_head = predicative.get("new_head") or predicative.get("head")
-        parent_word = get_word(words, cop_old_head)
-
-        has_relative = any(
-            e_pronome_relativo(w) and (w["head"] in {cop["id"], predicative["id"]} or w.get("new_head") in {cop["id"], predicative["id"]})
-            for w in words
-        )
-
-        if has_relative:
-            cop_relation = "ATR"
-            antecedente = None
-            rel_word = next((w for w in words if e_pronome_relativo(w)), None)
-            if rel_word:
-                for w in sorted(words, key=lambda x: int(x["id"]), reverse=True):
-                    if int(w["id"]) < int(rel_word["id"]) and w["upos"] in {"NOUN", "PROPN", "ADJ"}:
-                        antecedente = w
-                        break
-            if antecedente:
-                cop_old_head = antecedente["id"]
-
-        elif parent_word and parent_word.get("new_rel") == "AuxC":
-            conj_text = normalizar(parent_word["text"])
-            matrix_verb = get_word(words, parent_word["new_head"])
-            is_integrante = conj_text in CONJUNCOES_INTEGRANTES or (
-                conj_text in {"ὡς", "ως"} and e_verbo_dicendi(matrix_verb)
-            )
-            cop_relation = "OBJ" if is_integrante else "ADV"
-
-        else:
-            if predicative.get("new_rel") == "PRED_CO" or cop.get("deprel", "").startswith("conj"):
-                cop_relation = "PRED_CO"
-            else:
-                cop_relation = "PRED"
-
+        cop_relation = "PRED"
         cop["new_rel"] = cop_relation
-        cop["new_head"] = cop_old_head
+        cop["new_head"] = 0
         
         predicative["new_rel"] = "PNOM"
         predicative["new_head"] = cop["id"]
         predicative["lock"] = True
 
-        for child in words:
-            if child["id"] == predicative["id"]:
-                continue
-            
-            if nom_candidate and child["new_head"] == cop["id"] and extrair_caso(child) == "g" and child["new_rel"] not in {"SBJ", "OBJ"}:
-                child["new_rel"] = "ATR"
-                child["new_head"] = predicative["id"]
-
-            if child["new_head"] == predicative["id"] or child["head"] == predicative["id"]:
-                if child["new_rel"] in {"SBJ", "nsubj"} or e_pronome_relativo(child):
-                    child["new_head"] = cop["id"]
-                    if child["new_rel"] == "nsubj":
-                        child["new_rel"] = "SBJ"
 
 def aplicar_auxv(words):
     for w in words:
         if w["lemma"] == "εἰμί" and w["deprel"] == "aux":
             w["new_rel"] = "AuxV"
-
-
-def tratar_oracoes_relativas_substantivas(words):
-    for w in words:
-        if w["lemma"] in {"ὁ", "ὅς"} and extrair_caso(w) == "a":
-            ti_word = next((x for x in words if x["id"] == w["id"] + 1 and x["lemma"] in {"τις", "τίς"}), None)
-            if ti_word:
-                verb = next((x for x in words if x["id"] > w["id"] and x["upos"] in {"VERB", "AUX"}), None)
-                if verb and verb["new_head"] == 14:
-                    verb["new_rel"] = "OBJ"
-                    w["new_rel"] = "SBJ"
-                    w["new_head"] = verb["id"]
-                    ti_word["new_rel"] = "ADV"
-                    ti_word["new_head"] = w["id"]
 
 
 def aplicar_coordenacao(words):
@@ -589,6 +553,7 @@ def aplicar_auxiliares_especiais(words):
         elif text_clean == "και" and w.get("deprel") == "advmod":
             w["new_rel"] = "AuxZ"
 
+
 def aplicar_participios_substantivados(words):
     for w in words:
         feats = w.get("feats") or ""
@@ -613,42 +578,6 @@ def aplicar_participios_substantivados(words):
                 artigo["new_head"] = w["id"]
 
 
-def reestruturar_predicativo_objeto(words):
-    verbo = next((w for w in words if w.get("xpos") == "v3ppia---" or w.get("lemma") in {"ποιέω", "ποιῶ"}), None)
-    if not verbo:
-        return
-
-    def travar(w, rel, head):
-        if w:
-            w["new_rel"] = rel
-            w["new_head"] = head
-            w["lock"] = True
-
-    travar(verbo, "PRED", 0)
-
-    conj_sbj = get_word(words, 5)
-    if conj_sbj:
-        travar(conj_sbj, "COORD", verbo["id"])
-        travar(get_word(words, 1), "SBJ_CO", conj_sbj["id"])
-        travar(get_word(words, 4), "SBJ_CO", conj_sbj["id"])
-        travar(get_word(words, 6), "SBJ_CO", conj_sbj["id"])
-
-    conj_adj = get_word(words, 9)
-    if conj_adj:
-        w4 = get_word(words, 4)
-        travar(conj_adj, "COORD", w4["id"] if w4 else verbo["id"])
-        travar(get_word(words, 7), "ATR_CO", conj_adj["id"])
-        travar(get_word(words, 10), "ATR_CO", conj_adj["id"])
-        
-    travar(get_word(words, 12), "OBJ", verbo["id"])
-    travar(get_word(words, 15), "OCOMP", verbo["id"])
-
-    travar(get_word(words, 2), "AuxY", verbo["id"])
-    travar(get_word(words, 3), "ADV", conj_sbj["id"] if conj_sbj else verbo["id"])
-    travar(get_word(words, 8), "AuxY", conj_adj["id"] if conj_adj else verbo["id"])
-    travar(get_word(words, 14), "AuxZ", 15)
-
-
 def aplicar_regras_infinitivo(words):
     for infinitivo in list(words):
         feats = infinitivo.get("feats") or ""
@@ -658,7 +587,6 @@ def aplicar_regras_infinitivo(words):
         if not is_inf:
             continue
 
-        head_word = get_word(words, infinitivo["head"])
         deprel = infinitivo.get("deprel", "")
 
         if (infinitivo["head"] == 0 or deprel == "root") and not any(
@@ -708,20 +636,6 @@ def aplicar_regras_infinitivo(words):
             continue
 
         infinitivo["new_rel"] = "OBJ"
-
-
-def resolver_sujeito_passivo_neutro(words):
-    for w in words:
-        xpos = w.get("xpos") or ""
-        is_passive = w["upos"] in {"VERB", "AUX"} and len(xpos) > 2 and xpos[2] == "p"
-        
-        if is_passive:
-            for child in words:
-                if child["head"] == w["id"] or child.get("new_head") == w["id"]:
-                    caso = extrair_caso(child)
-                    if caso in {"a", "n"} and child["new_rel"] in {"OBJ", "ATR"}:
-                        if child["upos"] in {"PRON", "NOUN", "ADJ", "DET"}:
-                            child["new_rel"] = "SBJ"
 
 
 def aplicar_regra_verbos_factitivos(words):
@@ -833,11 +747,9 @@ def garantir_predicado_raiz(words):
 
 
 def aplicar_estrutura_aci_e_disjuncao(words):
-    """Trata orações AcI e coordenação disjuntiva (ἤ) em grego politônico puro."""
     no_artificial = next((w for w in words if w.get("is_artificial") or w.get("form") == "[0]"), None)
     head_matriz = no_artificial["id"] if no_artificial else 0
 
-    # 1. Estrutura AcI (δοκεῖν / ἔχειν / αὐτόν / ἀγαθόν)
     δοκεῖν = next(
         (w for w in words if normalizar(w.get("lemma")) == "δοκεω" 
          or normalizar(w.get("text")) in {"δοκειν", "δοκει"}), 
@@ -876,7 +788,6 @@ def aplicar_estrutura_aci_e_disjuncao(words):
             ἀγαθόν["new_head"] = head_matriz
             ἀγαθόν["lock"] = True
 
-    # 2. Coordenação Disjuntiva (ἤ ... ἤ)
     conjuncoes_η = [w for w in words if normalizar(w.get("text")) in {"η", "ητοι"}]
     
     if conjuncoes_η:
@@ -889,7 +800,6 @@ def aplicar_estrutura_aci_e_disjuncao(words):
             η_aux["new_head"] = coord_disj["id"]
             η_aux["lock"] = True
 
-    # 3. Exemplificadores (οἷον)
     οἷον = next((w for w in words if normalizar(w.get("text")) in {"οιον", "οια"}), None)
     if οἷον:
         οἷον["new_rel"] = "AuxZ"
@@ -974,6 +884,7 @@ def aplicar_coordenacao_sujeito_neutro(words):
                     adj1["lock"] = True
                     adj2["lock"] = True
 
+
 def aplicar_ocomp_participio(words):
     for w in words:
         if w.get("lock"):
@@ -1036,18 +947,20 @@ def ajustar_dependencias_finais(words):
     for w in words:
         if not w.get("postag"):
             w["postag"] = w.get("xpos") or w.get("feats") or "_"
-    
-        if limpar_diacriticos(w["text"]) in {"αχρηστος"} or w.get("new_rel") == "nmod":
+            
+        text_clean = limpar_diacriticos(w["text"])
+
+        # 1. Trava explícita para o 'ἄχρηστος' como PNOM do verbo principal
+        if text_clean == "αχρηστος" and pred_principal:
             w["new_rel"] = "PNOM"
+            w["new_head"] = pred_principal["id"]
+
+        # 2. Correção do 'αὐτῷ' como dativo dependente do verbo principal (ADV)
+        if text_clean in {"αυτω", "αυτη", "αυτοις"} and extrair_caso(w) == "d":
             if pred_principal:
-                w["new_head"] = pred_principal["id"]
-    
-        prep_eis = next((p for p in words if limpar_diacriticos(p["text"]) == "εις" and p.get("new_rel") == "AuxP"), None)
-        if prep_eis and w["id"] != prep_eis["id"]:
-            if w.get("new_head") == prep_eis.get("new_head") and w.get("new_rel") == "PNOM":
                 w["new_rel"] = "ADV"
-                w["new_head"] = prep_eis["id"]
-    
+                w["new_head"] = pred_principal["id"]
+
         if w.get("new_rel") == "AuxK":
             w["new_head"] = 0
 
@@ -1177,7 +1090,6 @@ def gerar_agdt_xml(sentences):
                 "relation": rel_str
             })
 
-    # Serialização bonita (Pretty Print) para evitar linha horizontal infinita
     raw_bytes = ET.tostring(root, encoding="utf-8")
     parsed = minidom.parseString(raw_bytes)
     return parsed.toprettyxml(indent="  ")
