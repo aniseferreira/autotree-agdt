@@ -1038,30 +1038,36 @@ def aplicar_ocomp_participio(words):
 def converter_sentenca(sent):
     words = construir_words(sent)
     
+    # 1. Limpeza e Inicialização
     sanitizar_morfologia_stanza(words) 
     inicializar_agdt(words)
 
+    # 2. Resolução do Escopo Nominal e Adverbial
     desconstruir_atribuicoes_sem_concordancia(words)
     aplicar_infinitivo_substantivado_artigo(words)
-    
+    aplicar_artigos_repetidos(words)                 # <-- Mova para cá (ajusta substantivação/modificadores)
     tratar_adverbios_cristalizados_e_sintagmaticos(words)
+    aplicar_auxp(words)                              # <-- Mova para cá (associa preposições antes das orações)
+
+    # 3. Estruturas Verbais Cópulas e Núcleos
     aplicar_coordenacao_sujeito_neutro(words)
     aplicar_regra_verbos_factitivos(words)
-    aplicar_auxiliares_especiais(words)
-    
     garantir_predicado_raiz(words)
-    aplicar_estrutura_aci_e_disjuncao(words)
-    
     aplicar_regras_infinitivo(words)
+    aplicar_estrutura_aci_e_disjuncao(words)         # <-- Mova para ANTES das regras de partículas/coordenação
     aplicar_participios_substantivados(words)
-    aplicar_ocomp_participio(words)  # <-- Adicione aqui
+    aplicar_ocomp_participio(words)
     aplicar_copula(words)
-    
+
+    # 4. Coordenação e Partículas Correlativas
     aplicar_coordenacao(words)
-    aplicar_oute_correlativo(words)
-    aplicar_artigos_repetidos(words)
-    aplicar_auxp(words)
+    aplicar_oute_correlativo(words)                 # <-- Mova para ANTES da regra genérica
+    aplicar_conectivos_correlativos(words)          # <-- Regra genérica de καί...καί / τε...τε
     
+    # 5. Fechamento de Partículas/Auxiliares (DEVE SER A ÚLTIMA REGRA SINTÁTICA)
+    aplicar_auxiliares_especiais(words)             # <-- Roda por último para garantir que PRED já existe e é definitivo
+    
+    # 6. Pós-processamento e Fallbacks do Graph
     for w in words:
         if w.get("lock"):
             continue
