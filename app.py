@@ -416,12 +416,11 @@ def resolver_predicados_excedentes(words):
 
 def aplicar_copula(words):
     for cop in words:
-        # Aceita 'cop' ou verbos 'ειμι' / 'γιγνομαι' que vieram como PRED/AUX do Stanza
+        # Captura tanto o rótulo 'cop' do UD quanto os lemas de ligação
         is_copula_lemma = limpar_diacriticos(cop.get("lemma") or cop.get("text")) in {"ειμι", "γιγνομαι"}
         if cop["new_rel"] != "cop" and not (is_copula_lemma and cop.get("upos") in {"VERB", "AUX"}):
             continue
-
-        # Se não tiver 'head' de 'cop', encontra o predicativo em nominativo apontando para a cópula
+            
         predicative = get_word(words, cop["head"])
         if predicative is None or predicative["id"] == cop["id"]:
             predicative = next(
@@ -451,7 +450,7 @@ def aplicar_copula(words):
                 predicative["new_head"] = nom_candidate["id"]
                 predicative = nom_candidate
 
-        cop_old_head = predicative["new_head"]
+        cop_old_head = predicative.get("new_head") or predicative.get("head")
         parent_word = get_word(words, cop_old_head)
 
         has_relative = any(
@@ -490,6 +489,7 @@ def aplicar_copula(words):
         
         predicative["new_rel"] = "PNOM"
         predicative["new_head"] = cop["id"]
+        predicative["lock"] = True
 
         for child in words:
             if child["id"] == predicative["id"]:
@@ -504,7 +504,6 @@ def aplicar_copula(words):
                     child["new_head"] = cop["id"]
                     if child["new_rel"] == "nsubj":
                         child["new_rel"] = "SBJ"
-
 
 def aplicar_auxv(words):
     for w in words:
