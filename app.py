@@ -156,7 +156,9 @@ PREPOSICOES_GREGAS = {
     "δι'", "δι’", "ἐπ'", "ἐπ’", "ἐφ'", "ἐφ’", "κατ'", "κατ’", "καθ'", "καθ’",
     "μετ'", "μετ’", "μεθ'", "μεθ’", "παρ'", "παρ’", "περ'", "περ’", "ὑπ'", "ὑπ’", "ὑφ'", "ὑφ’"
 }
-
+PREPOSICOES_GREGAS.update({
+    "κατ᾿", "κατ'", "κατ’", "καθ᾿", "καθ'", "καθ’"
+})
 
 
 PONTUACAO_AUXG = {"ʼ", "῾", "'", "’", "“", "”", "‘", "’", '"'}
@@ -213,6 +215,15 @@ def sanitizar_morfologia_stanza(words):
     """Corrige falhas graves do Stanza em verbos e substantivos iniciais antes do parsing sintático."""
     if not words:
         return
+
+    # Correção de preposições elididas que o Stanza confunde com adjetivo/advérbio
+    for w in words:
+        texto_clean = w.get("text", "").strip()
+        if texto_clean in PREPOSICOES_GREGAS or limpar_diacriticos(texto_clean) in {"κατ", "καθ", "δια", "μετ", "παρ", "επ", "εφ", "απ", "αφ"}:
+            w["upos"] = "ADP"
+            w["xpos"] = "r--------"
+            w["postag"] = "r--------"
+            w["lemma"] = "κατά" if limpar_diacriticos(texto_clean) in {"κατ", "καθ"} else w.get("lemma")
 
     # 1. Correção específica para ποιοῦσι
     for w in words:
