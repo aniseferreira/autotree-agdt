@@ -963,7 +963,47 @@ def ajustar_dependencias_finais(words):
 
         if w.get("new_rel") == "AuxK":
             w["new_head"] = 0
+            
+def rebalancear_dependentes_por_fronteira_coord(words):
+    """
+    Garante que adjuntos e complementos posteriores ao delimitador/conectivo
+    de coordenação se vinculem ao PRED_CO da sua respectiva oração, e não ao primeiro.
+    """
+    # 1. Encontra todos os predicados coordenados na ordem de aparição
+    predicados_co = sorted(
+        [w for w in words if w.get("new_rel") == "PRED_CO"],
+        key=lambda x: x["id"]
+    )
+    
+    if len(predicados_co) < 2:
+        return
 
+    p1, p2 = predicados_co[0], predicados_co[1]
+
+    # 2. Identifica o ponto de corte (menor ID entre a vírgula/pontuação de transição e o COORD)
+    coord_node = next((w for w in words if w.get("new_rel") == "COORD"), None)
+    
+    ponto_de_corte = p1["id"]
+    if coord_node:
+        ponto_de_corte = coord_node["id"]
+        # Se houver pontuação de separação logo antes do COORD (ex: vírgula), usa a vírgula como marca
+        virgula_anterior = [
+            w for w in words 
+            if w.get("upos") == "PUNCT" and p1["id"] < w["id"] < coord_node["id"]
+        ]
+        if virgula_anterior:
+            ponto_de_corte = virgula_anterior[0]["id"]
+
+    # 3. Reatribui dependentes que ultrapassaram a fronteira oracional
+    for w in words:
+        current_head = w.get("new_head")
+        
+        # Se o elemento está APÓS o ponto de corte, mas ainda aponta para o primeiro predicado (p1)
+        if w["id"] > ponto_de_corte and current_head == p1["id"]:
+            # Não movemos o próprio nó COORD nem a pontuação de corte
+            if w["id"] != coord_node["id"] if coord_node else True:
+                w["new_head"] = p2["id"]
+                w["head"] = p2["id"]
 
 def sanitizar_arvore_agdt(words):
     pred_principal = next(
@@ -1237,6 +1277,9 @@ def converter_sentenca(sent):
 
     # 7. VALIDAÇÃO FINAL DA REGRA DE OURO (Garante PRED_CO simétrico em toda a sentença)
     garantir_simetria_coord_predicados(words)
+
+    # REBALANCEAMENTO DE ESCOPO (Impede adjuntos de "vazarem" para a oração anterior)
+    rebalancear_dependentes_por_fronteira_coord(words)
 
     # 8. Mapeamento final de heads e relações
     for w in words:
