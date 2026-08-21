@@ -1206,8 +1206,8 @@ def converter_sentenca(sent):
             w["new_head"] = 0
 
     for w in words:
-    if w.get("upos") in {"VERB", "AUX"} or eh_predicado_potencial(w):
-        print(f"Palavra: {w['text']} | Rel: {w.get('new_rel')} | Head: {w.get('new_head')}")
+        if w.get("upos") in {"VERB", "AUX"} or eh_predicado_potencial(w):
+            print(f"Palavra: {w['text']} | Rel: {w.get('new_rel')} | Head: {w.get('new_head')}")
 
     return {"text": sent.text, "words": words}
 
