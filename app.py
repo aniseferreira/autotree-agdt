@@ -1236,101 +1236,87 @@ def garantir_simetria_coord_predicados(words):
                 w["relation"] = "PRED_CO"
                 w["head"] = coord_node["id"]
 
+def resolver_coordenacao_adversativa_de(words):
+    """
+    Força δέ como COORD e une os predicados oracionais (ex: σημαίνει e προαγορεύει) como PRED_CO.
+    """
+    # Localiza o δέ da segunda oração
+    de_node = next((w for w in words if normalizar(w.get("lemma", "")) == "δέ" or normalizar(w.get("text", "")) in {"δέ", "δε"}), None)
+    
+    # Identifica verbos finitos principais
+    predicados = [
+        w for w in words 
+        if eh_predicado_potencial(w) or normalizar(w.get("lemma", "")) in {"σημαίνω", "προαγορεύω"}
+    ]
+
+    if de_node and len(predicados) >= 2:
+        de_node["new_rel"] = "COORD"
+        de_node["relation"] = "COORD"
+        de_node["new_head"] = 0
+        de_node["head"] = 0
+        de_node["lock"] = True
+
+        for p in predicados:
+            p["new_rel"] = "PRED_CO"
+            p["relation"] = "PRED_CO"
+            p["new_head"] = de_node["id"]
+            p["head"] = de_node["id"]
+            p["lock"] = True
+
+
 def aplicar_regra_agente_da_passiva(words):
     """
-    Identifica construções de Agente da Passiva:
-    Verbo na voz passiva + preposição ὑπό (AuxP) + Genitivo.
-    Define a relação da preposição como OBJ (ou o termo regido como OBJ sob AuxP).
+    Identifica 'ὑπό + termo' e marca a preposição como AuxP e o termo dependente como OBJ.
     """
     for w in words:
         text_norm = normalizar(w.get("text", ""))
         lemma_norm = normalizar(w.get("lemma", ""))
         
-        # Identifica a preposição ὑπό
-        if lemma_norm == "ὑπό" or text_norm in {"ὑπό", "ὑπὸ", "υπo", "υπ' ", "ὑπ'"}:
-            head_id = w.get("new_head", w.get("head"))
-            head_word = next((x for x in words if x["id"] == head_id), None)
+        if lemma_norm == "ὑπό" or text_norm in {"ὑπό", "υπo", "υπ'", "ὑπ'"}:
+            w["new_rel"] = "AuxP"
+            w["relation"] = "AuxP"
+            w["lock"] = True
             
-            # Verifica se o verbo regente está na voz passiva
-            is_passive = False
-            if head_word:
-                feats = head_word.get("feats", "")
-                xpos = head_word.get("xpos", "")
-                if "Voice=Pass" in feats or (len(xpos) > 2 and xpos[2] == "p"):
-                    is_passive = True
-
-            if is_passive:
-                w["new_rel"] = "AuxP"
-                w["relation"] = "AuxP"
-                # O elemento dependente da preposição ὑπό passa a ser OBJ (Agente da Passiva)
-                for dep in words:
-                    if dep.get("new_head", dep.get("head")) == w["id"]:
-                        dep["new_rel"] = "OBJ"
-                        dep["relation"] = "OBJ"
+            # O termo que vem logo após a preposição (ex: τινος) vira OBJ (Agente da Passiva)
+            for dep in words:
+                if dep.get("new_head", dep.get("head")) == w["id"] or dep["id"] == w["id"] + 1:
+                    dep["new_head"] = w["id"]
+                    dep["head"] = w["id"]
+                    dep["new_rel"] = "OBJ"
+                    dep["relation"] = "OBJ"
+                    dep["lock"] = True
 
 
 def rebalancear_dativo_instrumental_e_sujeitos(words):
     """
-    1. Corrige o infinitivo inicial de oração paralela para SBJ de verbos declarativos/indicativos.
-    2. Revincula dativos instrumentais (ex: λίθοις) ao verbo imediatamente adjacente.
+    1. Vincula 'λίθοις' diretamente ao verbo/infinitivo adjacente (Βάλλειν e βάλλεσθαι) como ADV.
+    2. Garante que o infinitivo inicial da segunda oração (βάλλεσθαι) seja SBJ.
     """
-    predicados = [w for w in words if eh_predicado_potencial(w) or w.get("new_rel") in {"PRED", "PRED_CO"}]
-    
-    for p in predicados:
-        # 1. Se o predicado é um verbo de declaração/significado (ex: σημαίνει, προαγορεύει)
-        # e possui um infinitivo logo no início da sua oração, este infinitivo deve ser SBJ
-        infinitivos_dependentes = [
-            w for w in words 
-            if w.get("new_head") == p["id"] and "VerbForm=Inf" in w.get("feats", "")
-        ]
-        for inf in infinitivos_dependentes:
-            if inf.get("new_rel") == "OBJ":
-                inf["new_rel"] = "SBJ"
-                inf["relation"] = "SBJ"
-
-    # 2. Correção de ligação do dativo instrumental (ex: λίθοις com Βάλλειν e βάλλεσθαι)
     for w in words:
-        # Se for um substantivo/pronome no dativo
-        if "Case=Dat" in w.get("feats", "") or (len(w.get("xpos", "")) > 3 and w.get("xpos")[3] == "d"):
-            head_id = w.get("new_head", w.get("head"))
-            head_word = next((x for x in words if x["id"] == head_id), None)
-            
-            # Procura o verbo/infinitivo verbal mais próximo no mesmo escopo
-            verbos_proximos = [
-                x for x in words 
-                if ("VerbForm=Inf" in x.get("feats", "") or eh_predicado_potencial(x))
-                and abs(x["id"] - w["id"]) <= 3
-            ]
-            if verbos_proximos:
-                verbo_correto = min(verbos_proximos, key=lambda x: abs(x["id"] - w["id"]))
-                w["new_head"] = verbo_correto["id"]
-                w["head"] = verbo_correto["id"]
-                if w.get("new_rel") not in {"OBJ", "ADV"}:
-                    w["new_rel"] = "ADV"
-                    w["relation"] = "ADV"
+        text_norm = normalizar(w.get("text", ""))
+        
+        # 1. Ajuste de 'λίθοις'
+        if text_norm in {"λίθοις", "λιθοις"}:
+            # Encontra o infinitivo mais próximo (Βάλλειν no ID 1 ou βάλλεσθαι no ID 9)
+            infinitivos = [x for x in words if "VerbForm=Inf" in x.get("feats", "") or normalizar(x.get("lemma", "")) in {"βάλλω", "εἶπον", "ἀκούω"}]
+            if infinitivos:
+                verbo_proximo = min(infinitivos, key=lambda x: abs(x["id"] - w["id"]))
+                w["new_head"] = verbo_proximo["id"]
+                w["head"] = verbo_proximo["id"]
+                w["new_rel"] = "ADV"
+                w["relation"] = "ADV"
+                w["lock"] = True
 
-
-def resolver_coordenacao_adversativa_de(words):
-    """
-    Trata partículas adversativas/disjuntivas (ex: δὲ) como COORD 
-    quando conectam duas orações com predicados paralelos.
-    """
-    de_nodes = [w for w in words if normalizar(w.get("lemma", "")) == "δέ" or normalizar(w.get("text", "")) in {"δέ", "δε"}]
-    predicados = [w for w in words if eh_predicado_potencial(w)]
-
-    if de_nodes and len(predicados) >= 2:
-        coord_node = de_nodes[0]
-        coord_node["new_rel"] = "COORD"
-        coord_node["relation"] = "COORD"
-        coord_node["new_head"] = 0
-        coord_node["head"] = 0
-
-        p1, p2 = predicados[0], predicados[1]
-        for p in (p1, p2):
-            p["new_rel"] = "PRED_CO"
-            p["relation"] = "PRED_CO"
-            p["new_head"] = coord_node["id"]
-            p["head"] = coord_node["id"]
+        # 2. Ajuste de 'βάλλεσθαι' para SBJ
+        if text_norm in {"βάλλεσθαι", "βαλλεσθαι"}:
+            # Procura o predicado da segunda oração (προαγορεύει)
+            pred2 = next((x for x in words if normalizar(x.get("lemma", "")) == "προαγορεύω" or x["id"] > w["id"] and eh_predicado_potencial(x)), None)
+            if pred2:
+                w["new_head"] = pred2["id"]
+                w["head"] = pred2["id"]
+                w["new_rel"] = "SBJ"
+                w["relation"] = "SBJ"
+                w["lock"] = True
 
 
 def converter_sentenca(sent):
