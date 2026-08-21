@@ -1370,8 +1370,11 @@ def converter_sentenca(sent):
     # REBALANCEAMENTO DE ESCOPO (Impede adjuntos de "vazarem" para a oração anterior)
     rebalancear_dependentes_por_fronteira_coord(words)
 
-    # 8. Mapeamento final de heads e relações
+    # 8. Mapeamento final de heads e relações (Apenas se não estiver travado por regra)
     for w in words:
+        if w.get("lock"):
+            continue  # Impede que o mapeador básico sobrescreva as correções!
+            
         if w.get("new_head") is None: 
             w["new_head"] = w.get("head", 0)
             
@@ -1381,7 +1384,6 @@ def converter_sentenca(sent):
         if w.get("new_rel") == "AuxK": 
             w["new_head"] = 0
 
-        # Trava anti-loop final
         if str(w.get("new_head")) == str(w.get("id")):
             w["new_head"] = 0
 
