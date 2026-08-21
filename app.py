@@ -1109,41 +1109,38 @@ def sanar_nos_orfaos(words):
             
 def sanitizar_coordenacao_predicados(words):
     """
-    Garante a regra sintática do AGDT:
-    - Se houver qualquer PRED_CO na árvore, TODOS os PREDs principais devem virar PRED_CO.
-    - Todos os PRED_CO devem apontar para o nó COORD principal.
-    - Se houver um COORD com head=0, nenhum PRED pode ter head=0.
+    Elimina a assimetria PRED + PRED_CO.
+    Se existe um COORD e um PRED_CO na oração, força todos os PREDs a virarem PRED_CO
+    e aponta para o COORD raiz.
     """
-    # 1. Localiza a raiz de coordenação principal (head == 0 e rel == COORD)
-    coord_raiz = next((w for w in words if w.get("new_rel") == "COORD" and str(w.get("new_head")) == "0"), None)
+    # 1. Localiza a conjunção/coordenador principal
+    coord_node = next((w for w in words if w.get("new_rel") == "COORD" or w.get("deprel", "").startswith("cc")), None)
     
-    # Se não houver COORD na raiz, procura qualquer nó COORD existente
-    if not coord_raiz:
-        coord_raiz = next((w for w in words if w.get("new_rel") == "COORD"), None)
+    if not coord_node:
+        return
 
-    # 2. Se existe um nó COORD na frase:
-    if coord_raiz:
-        # Garante que o COORD seja a raiz da árvore
-        coord_raiz["new_rel"] = "COORD"
-        coord_raiz["new_head"] = 0
+    # 2. Verifica se há algum PRED_CO já identificado
+    tem_pred_co = any(w.get("new_rel") == "PRED_CO" for w in words)
+    
+    # 3. Se há um COORD e ao menos um PRED_CO, nenhum verbo pode ficar como PRED solto
+    if tem_pred_co or len([w for w in words if eh_predicado_potencial(w)]) >= 2:
+        coord_node["new_rel"] = "COORD"
+        coord_node["new_head"] = 0
+        coord_node["relation"] = "COORD"
+        coord_node["head"] = 0
+        coord_node["lock"] = True
 
-        # Coleta todos os verbos/predicados que estão marcados como PRED ou PRED_CO
-        predicados = [w for w in words if w.get("new_rel") in {"PRED", "PRED_CO"} or eh_predicado_potencial(w)]
-
-        # Se temos 2 ou mais predicados sob coordenação:
-        if len(predicados) >= 2:
-            for p in predicados:
-                # Regra de Ouro: Transforma TODOS em PRED_CO e pendura no COORD
-                p["new_rel"] = "PRED_CO"
-                p["new_head"] = coord_raiz["id"]
+        for w in words:
+            # Se a palavra é um predicado potencial ou está marcada como PRED/PRED_CO
+            if (w.get("new_rel") in {"PRED", "PRED_CO"} or eh_predicado_potencial(w)) and w["id"] != coord_node["id"]:
+                # Força a conversão em PRED_CO
+                w["new_rel"] = "PRED_CO"
+                w["new_head"] = coord_node["id"]
                 
-    # 3. Trava de consistência oposta: Se NÃO há COORD, não pode haver PRED_CO isolado
-    else:
-        pred_cos = [w for w in words if w.get("new_rel") == "PRED_CO"]
-        if pred_cos:
-            for p in pred_cos:
-                p["new_rel"] = "PRED"
-                p["new_head"] = 0
+                # Sincroniza as chaves originais para evitar que geradores de XML desatualizados peguem o Stanza antigo
+                w["relation"] = "PRED_CO"
+                w["head"] = coord_node["id"]
+                w["lock"] = True
 
 def converter_sentenca(sent):
     words = construir_words(sent)
@@ -1207,6 +1204,10 @@ def converter_sentenca(sent):
         # Trava anti-loop final
         if str(w.get("new_head")) == str(w.get("id")):
             w["new_head"] = 0
+
+    for w in words:
+    if w.get("upos") in {"VERB", "AUX"} or eh_predicado_potencial(w):
+        print(f"Palavra: {w['text']} | Rel: {w.get('new_rel')} | Head: {w.get('new_head')}")
 
     return {"text": sent.text, "words": words}
 
