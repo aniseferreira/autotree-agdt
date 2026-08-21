@@ -1442,93 +1442,19 @@ def resolver_escopo_acusativos_infinitivos(words):
                 w["new_rel"] = "OBJ"
                 w["relation"] = "OBJ"
 
-def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
-    """
-    Tenta refinar a árvore sintática usando uma cascata de modelos no OpenRouter.
-    Se o modelo principal falhar (timeout, erro 500 ou resposta inválida), 
-    o código automaticamente tenta o próximo da lista de fallback.
-    """
-    if not api_key:
-        return words
-
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-    # Ordem de prioridade da cascata (Fallback)
-    CASCATA_MODELOS = [
-        "anthropic/claude-3.5-haiku",    # 1º Opção: Rápido, preciso e barato
-        "google/gemini-2.5-flash",        # 2º Opção: Backup excelente e rápido
-        "openai/gpt-4o-mini"              # 3º Opção: Último recurso
-    ]
-
-    tokens_payload = [
-        {
-            "id": w["id"], 
-            "form": w["text"], 
-            "lemma": w.get("lemma",""), 
-            "head": w.get("new_head", w.get("head")), 
-            "rel": w.get("new_rel", w.get("relation"))
-        }
-        for w in words
-    ]
-
-    prompt = f"""
-    Você é um especialista em anotação sintática em Grego Antigo no padrão AGDT / Arethusa.
-    Analise a sentença: "{text_sent}"
-    
-    Abaixo está a lista de tokens com id, form, lemma, head e relation atuais:
-    {json.dumps(tokens_payload, ensure_ascii=False)}
-    
-    Instruções de Ajuste:
-    1. Se houver coordenação de orações principais com COORD (head=0), NUNCA use PRED. Use PRED_CO para todos os verbos principais coordenados apontando para o nó COORD.
-    2. Agente da passiva (ὑπό + Genitivo) deve ter a preposição como AuxP e o termo regido como OBJ.
-    3. Verifique as valências e argumentos dos verbos no acusativo/dativo/genitivo para garantir que estejam ligados ao verbo semanticamente correto.
-    
-    Retorne APENAS um array JSON válido no formato:
-    [ {{"id": 1, "head": 7, "rel": "SBJ"}}, ... ]
-    """
-
-    # Percorre os modelos da cascata até um funcionar
-    for modelo in CASCATA_MODELOS:
-        payload = {
-            "model": modelo,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.0
-        }
-
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
-            if response.status_code == 200:
-                res_json = response.json()
-                content = res_json['choices'][0]['message']['content']
-                content_clean = content.replace("```json", "").replace("```", "").strip()
-                corrections = json.loads(content_clean)
-                
-                # Aplica as correções na árvore
-                corr_map = {item["id"]: item for item in corrections}
-                for w in words:
-                    if w["id"] in corr_map:
-                        w["new_head"] = corr_map[w["id"]]["head"]
-                        w["head"] = corr_map[w["id"]]["head"]
-                        w["new_rel"] = corr_map[w["id"]]["rel"]
-                        w["relation"] = corr_map[w["id"]]["rel"]
-                
-                # Sucesso! Interrompe a cascata e retorna a árvore corrigida pelo primeiro modelo que respondeu
-                print(f"Sucesso com o modelo: {modelo}")
-                return words
-
-        except Exception as e:
-            # Se deu erro no modelo atual, imprime o aviso e tenta o próximo da lista
-            print(f"Falha no modelo {modelo}. Tentando o próximo modelo da cascata... Erro: {e}")
-            continue
-
-    # Se todos os modelos da cascata falharem, retorna a árvore processada pelas regras locais
-    return words
-
-    """  # <-- As aspas de fechamento precisam estar aqui!
+prompt = (
+        "Você é um especialista em anotação sintática em Grego Antigo no padrão AGDT / Arethusa.\n"
+        f'Analise a sentença: "{text_sent}"\n\n'
+        "Abaixo está a lista de tokens com id, form, lemma, head e relation atuais:\n"
+        f"{json.dumps(tokens_payload, ensure_ascii=False)}\n\n"
+        "Instruções de Ajuste:\n"
+        "1. Se houver coordenação de orações principais com COORD (head=0), NUNCA use PRED. Use PRED_CO para todos os verbos principais coordenados apontando para o nó COORD.\n"
+        "2. Agente da passiva (ὑπό + Genitivo) deve ter a preposição como AuxP e o termo regido como OBJ.\n"
+        "3. Verifique as valências e argumentos dos verbos no acusativo/dativo/genitivo para garantir que estejam ligados ao verbo semanticamente correto.\n"
+        "4. ATENÇÃO: Quando houver múltiplos infinitivos em sequência (ex: Βάλλειν ... εἰπεῖν) e múltiplos acusativos 'τινὰ', CADA infinitivo deve receber o seu respectivo 'τινὰ' como OBJ (não vincule ambos ao mesmo verbo!).\n\n"
+        "Retorne APENAS um array JSON válido no formato:\n"
+        '[ {"id": 1, "head": 7, "rel": "SBJ"}, ... ]'
+    )
 
 
 def converter_sentenca(sent):
