@@ -1036,51 +1036,41 @@ def eh_predicado_potencial(w):
 
 def aplicar_coordenacao_predicados_generico(words):
     """
-    Coordena múltiplos predicados elevando a partícula/conjunção coordenativa real a COORD (raiz).
-    Dá prioridade a partículas pós-positivas de oração sobre focalizadores locais.
+    Se houver um COORD na frase e múltiplos predicados potenciais,
+    vincula ambos os predicados ao COORD como PRED_CO e rebaixa conectores secundários.
     """
     predicados = [w for w in words if eh_predicado_potencial(w)]
 
     if len(predicados) < 2:
         return
 
-    p1, p2 = predicados[0], predicados[1]
+    # Procura um elemento já marcado como COORD ou uma conjunção entre os predicados
+    coord_node = next((w for w in words if w.get("new_rel") == "COORD" or w.get("deprel", "").startswith("cc")), None)
 
-    # Candidatos a conector entre o fim do primeiro predicado e o início do segundo
-    candidatos = [
-        w for w in words 
-        if p1["id"] < w["id"] <= p2["id"] + 1
-        and (w.get("upos") in {"CCONJ", "PART"} or w.get("deprel", "").startswith("cc"))
-        and w.get("text", "").lower() not in {",", ".", "·"}
-    ]
-
-    if not candidatos:
-        return
-
-    # Prioridade 1: Partículas pós-positivas / conectores da segunda oração (ex: 'δέ')
-    # Se houver mais de um conector, o conector pós-positivo da oração 2 costuma ser o 'δέ'
-    coord_node = next((c for c in candidatos if c.get("deprel", "").startswith("cc")), None)
-    
-    # Se houver uma partícula (PART/CCONJ) especificamente associada ao bloco do segundo verbo, ela é a ponte
-    pos_positivos = [c for c in candidatos if c["id"] > p1["id"] and c.get("upos") in {"PART", "CCONJ"}]
-    if pos_positivos:
-        # Pega a partícula mais próxima do início da segunda oração que não seja vírgula/focalizador isolado
-        coord_node = pos_positivos[-1] if len(pos_positivos) > 1 and pos_positivos[-1].get("upos") == "PART" else pos_positivos[0]
+    if not coord_node:
+        # Pega a primeira conjunção/partícula entre o primeiro e o segundo predicado
+        coord_node = next(
+            (w for w in words 
+             if predicados[0]["id"] < w["id"] <= predicados[1]["id"] + 1
+             and w.get("upos") in {"CCONJ", "PART"}),
+            None
+        )
 
     if coord_node:
         coord_node["new_rel"] = "COORD"
         coord_node["new_head"] = 0
 
-        # Conecta os dois predicados ao novo COORD
+        # Amarra TODOS os predicados principais diretamente ao COORD
         for p in predicados:
             p["new_rel"] = "PRED_CO"
             p["new_head"] = coord_node["id"]
 
-        # Conectores/partículas secundárias (como o primeiro 'δέ' ou 'καί' isolados) passam a ser AuxY
-        for c in candidatos:
-            if c["id"] != coord_node["id"]:
-                c["new_rel"] = "AuxY"
-                c["new_head"] = coord_node["id"]
+        # Evita que o 'δέ' (ou outros conectores) tentem ser COORD simultaneamente
+        for w in words:
+            if w["id"] != coord_node["id"] and w.get("upos") in {"CCONJ", "PART"}:
+                if w.get("new_rel") in {"COORD", "PRED_CO"}:
+                    w["new_rel"] = "AuxY"
+                    w["new_head"] = coord_node["id"]
 
 def aplicar_focalizadores_auxz_generico(words):
     """
