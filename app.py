@@ -1442,10 +1442,11 @@ def resolver_escopo_acusativos_infinitivos(words):
                 w["new_rel"] = "OBJ"
                 w["relation"] = "OBJ"
 
-def refinar_arvore_com_openrouter(words, text_sent, api_key, model="openai/gpt-4o-mini"):
+def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     """
-    Envia a árvore anotada para o OpenRouter para validar/corrigir valências 
-    e relações de dependência complexas mantendo o padrão AGDT.
+    Tenta refinar a árvore sintática usando uma cascata de modelos no OpenRouter.
+    Se o modelo principal falhar (timeout, erro 500 ou resposta inválida), 
+    o código automaticamente tenta o próximo da lista de fallback.
     """
     if not api_key:
         return words
@@ -1453,12 +1454,24 @@ def refinar_arvore_com_openrouter(words, text_sent, api_key, model="openai/gpt-4
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Content-Type": "json"
+        "Content-Type": "application/json"
     }
 
-    # Simplifica os dados para economizar tokens
+    # Ordem de prioridade da cascata (Fallback)
+    CASCATA_MODELOS = [
+        "anthropic/claude-3.5-haiku",    # 1º Opção: Rápido, preciso e barato
+        "google/gemini-2.5-flash",        # 2º Opção: Backup excelente e rápido
+        "openai/gpt-4o-mini"              # 3º Opção: Último recurso
+    ]
+
     tokens_payload = [
-        {"id": w["id"], "form": w["text"], "lemma": w.get("lemma",""), "head": w.get("new_head", w.get("head")), "rel": w.get("new_rel", w.get("relation"))}
+        {
+            "id": w["id"], 
+            "form": w["text"], 
+            "lemma": w.get("lemma",""), 
+            "head": w.get("new_head", w.get("head")), 
+            "rel": w.get("new_rel", w.get("relation"))
+        }
         for w in words
     ]
 
@@ -1466,44 +1479,53 @@ def refinar_arvore_com_openrouter(words, text_sent, api_key, model="openai/gpt-4
     Você é um especialista em anotação sintática em Grego Antigo no padrão AGDT / Arethusa.
     Analise a sentença: "{text_sent}"
     
-    Abaixo está a lista de tokens com id, form, lemma, head e relation:
+    Abaixo está a lista de tokens com id, form, lemma, head e relation atuais:
     {json.dumps(tokens_payload, ensure_ascii=False)}
     
-    Regras de Ouro AGDT:
-    1. Se houver coordenação de orações com COORD (head=0), NUNCA use PRED. Use PRED_CO para todos os verbos coordenados apontando para COORD.
+    Instruções de Ajuste:
+    1. Se houver coordenação de orações principais com COORD (head=0), NUNCA use PRED. Use PRED_CO para todos os verbos principais coordenados apontando para o nó COORD.
     2. Agente da passiva (ὑπό + Genitivo) deve ter a preposição como AuxP e o termo regido como OBJ.
-    3. Verifique se os objetos no acusativo estão vinculados ao verbo correto (valência semântica).
+    3. Verifique as valências e argumentos dos verbos no acusativo/dativo/genitivo para garantir que estejam ligados ao verbo semanticamente correto.
     
-    Retorne APENAS um JSON válido contendo uma lista com o formato:
+    Retorne APENAS um array JSON válido no formato:
     [ {{"id": 1, "head": 7, "rel": "SBJ"}}, ... ]
     """
 
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.0
-    }
+    # Percorre os modelos da cascata até um funcionar
+    for modelo in CASCATA_MODELOS:
+        payload = {
+            "model": modelo,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0
+        }
 
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        if response.status_code == 200:
-            res_json = response.json()
-            content = res_json['choices'][0]['message']['content']
-            # Limpa formatação markdown se houver
-            content_clean = content.replace("```json", "").replace("```", "").strip()
-            corrections = json.loads(content_clean)
-            
-            # Aplica as correções trazidas pela LLM na árvore
-            corr_map = {item["id"]: item for item in corrections}
-            for w in words:
-                if w["id"] in corr_map:
-                    w["new_head"] = corr_map[w["id"]]["head"]
-                    w["head"] = corr_map[w["id"]]["head"]
-                    w["new_rel"] = corr_map[w["id"]]["rel"]
-                    w["relation"] = corr_map[w["id"]]["rel"]
-    except Exception as e:
-        print(f"Aviso: Falha ao consultar OpenRouter, mantendo regras locais. Erro: {e}")
-        
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            if response.status_code == 200:
+                res_json = response.json()
+                content = res_json['choices'][0]['message']['content']
+                content_clean = content.replace("```json", "").replace("```", "").strip()
+                corrections = json.loads(content_clean)
+                
+                # Aplica as correções na árvore
+                corr_map = {item["id"]: item for item in corrections}
+                for w in words:
+                    if w["id"] in corr_map:
+                        w["new_head"] = corr_map[w["id"]]["head"]
+                        w["head"] = corr_map[w["id"]]["head"]
+                        w["new_rel"] = corr_map[w["id"]]["rel"]
+                        w["relation"] = corr_map[w["id"]]["rel"]
+                
+                # Sucesso! Interrompe a cascata e retorna a árvore corrigida pelo primeiro modelo que respondeu
+                print(f"Sucesso com o modelo: {modelo}")
+                return words
+
+        except Exception as e:
+            # Se deu erro no modelo atual, imprime o aviso e tenta o próximo da lista
+            print(f"Falha no modelo {modelo}. Tentando o próximo modelo da cascata... Erro: {e}")
+            continue
+
+    # Se todos os modelos da cascata falharem, retorna a árvore processada pelas regras locais
     return words
 
 
@@ -1562,23 +1584,10 @@ def converter_sentenca(sent):
     # ------------------------------------------------------------------
     # CHAMADA DA API OPENROUTER (Lê dos Secrets do Streamlit automaticamente)
     # ------------------------------------------------------------------
+    # Tenta refinamento via API OpenRouter em cascata (se houver chave nos Secrets)
     api_key = st.secrets.get("OPENROUTER_API_KEY", "")
     if api_key:
-        # Pega o modelo escolhido na interface (ou usa um padrão)
-        modelo_escolhido = st.session_state.get("modelo_llm", "google/gemini-2.5-flash")
-        words = refinar_arvore_com_openrouter(words, sent.text, api_key, model=modelo_escolhido)
-
-    # 8. SINCRONIZAÇÃO FINAL DOS CAMPOS
-    for w in words:
-        if w.get("new_head") is not None:
-            w["head"] = w["new_head"]
-        if w.get("new_rel") is not None:
-            w["relation"] = w["new_rel"]
-            
-        if str(w.get("head")) == str(w.get("id")):
-            w["head"] = 0
-
-    return {"text": sent.text, "words": words}
+        words = refinar_arvore_com_openrouter_cascata(words, sent.text, api_key)
 
     # REBALANCEAMENTO DE ESCOPO (Impede adjuntos de "vazarem" para a oração anterior)
     rebalancear_dependentes_por_fronteira_coord(words)
