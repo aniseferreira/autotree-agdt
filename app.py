@@ -1528,6 +1528,8 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     # Se todos os modelos da cascata falharem, retorna a árvore processada pelas regras locais
     return words
 
+    """  # <-- As aspas de fechamento precisam estar aqui!
+
 
 def converter_sentenca(sent):
     words = construir_words(sent)
