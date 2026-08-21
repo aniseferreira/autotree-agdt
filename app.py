@@ -1106,7 +1106,44 @@ def sanar_nos_orfaos(words):
         # Resgata nós sem pai que não sejam raízes legítimas
         elif (w.get("new_head") is None or w.get("new_head") == 0) and w.get("new_rel") not in {"COORD", "PRED", "AuxK"}:
             w["new_head"] = predicado_principal["id"]
+            
+def sanitizar_coordenacao_predicados(words):
+    """
+    Garante a regra sintática do AGDT:
+    - Se houver qualquer PRED_CO na árvore, TODOS os PREDs principais devem virar PRED_CO.
+    - Todos os PRED_CO devem apontar para o nó COORD principal.
+    - Se houver um COORD com head=0, nenhum PRED pode ter head=0.
+    """
+    # 1. Localiza a raiz de coordenação principal (head == 0 e rel == COORD)
+    coord_raiz = next((w for w in words if w.get("new_rel") == "COORD" and str(w.get("new_head")) == "0"), None)
+    
+    # Se não houver COORD na raiz, procura qualquer nó COORD existente
+    if not coord_raiz:
+        coord_raiz = next((w for w in words if w.get("new_rel") == "COORD"), None)
 
+    # 2. Se existe um nó COORD na frase:
+    if coord_raiz:
+        # Garante que o COORD seja a raiz da árvore
+        coord_raiz["new_rel"] = "COORD"
+        coord_raiz["new_head"] = 0
+
+        # Coleta todos os verbos/predicados que estão marcados como PRED ou PRED_CO
+        predicados = [w for w in words if w.get("new_rel") in {"PRED", "PRED_CO"} or eh_predicado_potencial(w)]
+
+        # Se temos 2 ou mais predicados sob coordenação:
+        if len(predicados) >= 2:
+            for p in predicados:
+                # Regra de Ouro: Transforma TODOS em PRED_CO e pendura no COORD
+                p["new_rel"] = "PRED_CO"
+                p["new_head"] = coord_raiz["id"]
+                
+    # 3. Trava de consistência oposta: Se NÃO há COORD, não pode haver PRED_CO isolado
+    else:
+        pred_cos = [w for w in words if w.get("new_rel") == "PRED_CO"]
+        if pred_cos:
+            for p in pred_cos:
+                p["new_rel"] = "PRED"
+                p["new_head"] = 0
 
 def converter_sentenca(sent):
     words = construir_words(sent)
@@ -1134,6 +1171,8 @@ def converter_sentenca(sent):
     # 4. Coordenação Genérica e Partículas
     aplicar_coordenacao_predicados_generico(words)
     aplicar_coordenacao(words)
+    # ENTRADA DA REGRA DE OURO: Unifica PRED + PRED_CO -> COORD
+    sanitizar_coordenacao_predicados(words)
     aplicar_oute_correlativo(words)
     aplicar_conectivos_correlativos(words)
     
