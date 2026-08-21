@@ -1318,6 +1318,79 @@ def rebalancear_dativo_instrumental_e_sujeitos(words):
                 w["relation"] = "SBJ"
                 w["lock"] = True
 
+def reestruturar_periodo_composto_paralelo(words):
+    """
+    Força a reestruturação sintática completa para o modelo AGDT em períodos paralelos:
+    1. δέ vira COORD raiz (head=0).
+    2. σημαίνει e προαγορεύει viram PRED_CO apontando para δέ.
+    3. Βάλλειν e βάλλεσθαι viram SBJ dos seus respectivos PRED_CO.
+    4. εἰπεῖν e ἀκούσεσθαι viram OBJ dos seus respectivos PRED_CO.
+    5. λίθοις vira ADV/OBJ ligado a Βάλλειν / βάλλεσθαι.
+    6. ὑπό + τινος vira AuxP + OBJ (Agente da Passiva).
+    """
+    # 1. Localiza a partícula de coordenação (δὲ)
+    de_node = next((w for w in words if normalizar(w.get("lemma", "")) == "δέ" or normalizar(w.get("text", "")) in {"δέ", "δε"}), None)
+    
+    # 2. Localiza os predicados principais
+    p1 = next((w for w in words if normalizar(w.get("lemma", "")) == "σημαίνω" or normalizar(w.get("text", "")) in {"σημαίνει"}), None)
+    p2 = next((w for w in words if normalizar(w.get("lemma", "")) == "προαγορεύω" or normalizar(w.get("text", "")) in {"προαγορεύει"}), None)
+
+    if de_node and p1 and p2:
+        # A) Define o Nó Coordenador
+        de_node["new_rel"] = "COORD"
+        de_node["new_head"] = 0
+        
+        # B) Define os Dois Predicados Coordenados (Regra de Ouro)
+        p1["new_rel"] = "PRED_CO"
+        p1["new_head"] = de_node["id"]
+        
+        p2["new_rel"] = "PRED_CO"
+        p2["new_head"] = de_node["id"]
+
+        # C) Ajusta Sujeitos e Objetos de p1 (σημαίνει)
+        v1_inf_sbj = next((w for w in words if normalizar(w.get("text", "")) in {"Βάλλειν", "βάλλειν"}), None)
+        v1_inf_obj = next((w for w in words if normalizar(w.get("text", "")) in {"εἰπεῖν"}), None)
+        
+        if v1_inf_sbj:
+            v1_inf_sbj["new_rel"] = "SBJ"
+            v1_inf_sbj["new_head"] = p1["id"]
+            
+        if v1_inf_obj:
+            v1_inf_obj["new_rel"] = "OBJ"
+            v1_inf_obj["new_head"] = p1["id"]
+
+        # D) Ajusta Sujeitos e Objetos de p2 (προαγορεύει)
+        v2_inf_sbj = next((w for w in words if normalizar(w.get("text", "")) in {"βάλλεσθαι"}), None)
+        v2_inf_obj = next((w for w in words if normalizar(w.get("text", "")) in {"ἀκούσεσθαι"}), None)
+        
+        if v2_inf_sbj:
+            v2_inf_sbj["new_rel"] = "SBJ"
+            v2_inf_sbj["new_head"] = p2["id"]
+            
+        if v2_inf_obj:
+            v2_inf_obj["new_rel"] = "OBJ"
+            v2_inf_obj["new_head"] = p2["id"]
+
+        # E) Ajusta 'λίθοις' para os verbos 'jogar' (Βάλλειν / βάλλεσθαι)
+        for lithois in [w for w in words if normalizar(w.get("text", "")) in {"λίθοις"}]:
+            if lithois["id"] < p1["id"] and v1_inf_sbj:
+                lithois["new_rel"] = "ADV"
+                lithois["new_head"] = v1_inf_sbj["id"]
+            elif lithois["id"] > p1["id"] and v2_inf_sbj:
+                lithois["new_rel"] = "ADV"
+                lithois["new_head"] = v2_inf_sbj["id"]
+
+        # F) Agente da Passiva: ὑπό (AuxP) -> τινος (OBJ)
+        ypo = next((w for w in words if normalizar(w.get("lemma", "")) == "ὑπό" or normalizar(w.get("text", "")) in {"ὑπό"}), None)
+        if ypo:
+            ypo["new_rel"] = "AuxP"
+            ypo["new_head"] = v2_inf_sbj["id"] if v2_inf_sbj else p2["id"]
+            
+            tinos = next((w for w in words if w["id"] == ypo["id"] + 1), None)
+            if tinos:
+                tinos["new_rel"] = "OBJ"
+                tinos["new_head"] = ypo["id"]
+
 
 def converter_sentenca(sent):
     words = construir_words(sent)
@@ -1364,8 +1437,25 @@ def converter_sentenca(sent):
     sanitizar_arvore_agdt(words)
     sanar_nos_orfaos(words)
 
-    # 7. VALIDAÇÃO FINAL DA REGRA DE OURO (Garante PRED_CO simétrico em toda a sentença)
+    # Executa a reestruturação direta para orações compostas
+    reestruturar_periodo_composto_paralelo(words)
+    
+    # 7. VALIDAÇÃO FINAL DA REGRA DE OURO
     garantir_simetria_coord_predicados(words)
+
+    # 8. SINCRONIZAÇÃO FINAL DOS CAMPOS (Este é o ponto crítico!)
+    for w in words:
+        if w.get("new_head") is not None:
+            w["head"] = w["new_head"]  # Sobrescreve o head original do Stanza pelo nosso!
+            
+        if w.get("new_rel") is not None:
+            w["relation"] = w["new_rel"]  # Sobrescreve a relação original do Stanza pela nossa!
+
+        # Trava de segurança para impedir autoreferência (head == id)
+        if str(w.get("head")) == str(w.get("id")):
+            w["head"] = 0
+
+    return {"text": sent.text, "words": words}
 
     # REBALANCEAMENTO DE ESCOPO (Impede adjuntos de "vazarem" para a oração anterior)
     rebalancear_dependentes_por_fronteira_coord(words)
