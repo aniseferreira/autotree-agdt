@@ -1391,6 +1391,30 @@ def reestruturar_periodo_composto_paralelo(words):
                 tinos["new_rel"] = "OBJ"
                 tinos["new_head"] = ypo["id"]
 
+def resolver_escopo_acusativos_infinitivos(words):
+    """
+    Regra Genérica: Em construções com múltiplos infinitivos na mesma oração,
+    associa objetos não anexados (como pronomes indefinidos 'τινα') ao infinitivo 
+    mais próximo no fluxo linear da frase, respeitando os limites dos verbos.
+    """
+    infinitivos = [w for w in words if "VerbForm=Inf" in w.get("feats", "") or normalizar(w.get("lemma", "")) in {"βάλλω", "εἶπον", "ἀκούω"}]
+    
+    if len(infinitivos) < 2:
+        return
+
+    # Procura pronomes/substantivos no acusativo que estejam órfãos ou mal atribuídos
+    for w in words:
+        if normalizar(w.get("lemma", "")) == "τις" or "Case=Acc" in w.get("feats", ""):
+            # Encontra o infinitivo mais próximo ANTERIOR ou IMEDIATAMENTE POSTERIOR
+            inf_proximo = min(infinitivos, key=lambda inf: abs(inf["id"] - w["id"]))
+            
+            # Se o acusativo pertence ao escopo do infinitivo mais próximo, revincula
+            if inf_proximo:
+                w["new_head"] = inf_proximo["id"]
+                w["head"] = inf_proximo["id"]
+                w["new_rel"] = "OBJ"
+                w["relation"] = "OBJ"
+
 
 def converter_sentenca(sent):
     words = construir_words(sent)
