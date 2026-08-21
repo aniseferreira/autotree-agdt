@@ -1442,11 +1442,44 @@ def resolver_escopo_acusativos_infinitivos(words):
                 w["new_rel"] = "OBJ"
                 w["relation"] = "OBJ"
 
-prompt = (
+def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
+    """
+    Tenta refinar a árvore sintática via OpenRouter testando modelos em cascata.
+    """
+    if not api_key:
+        return words
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    CASCATA_MODELOS = [
+        "anthropic/claude-3.5-haiku",
+        "google/gemini-2.5-flash",
+        "openai/gpt-4o-mini"
+    ]
+
+    tokens_payload = [
+        {
+            "id": w["id"], 
+            "form": w["text"], 
+            "lemma": w.get("lemma",""), 
+            "head": w.get("new_head", w.get("head")), 
+            "rel": w.get("new_rel", w.get("relation"))
+        }
+        for w in words
+    ]
+
+    # Concatenação segura para evitar erros de sintaxe ou NameError no escopo global
+    str_payload = json.dumps(tokens_payload, ensure_ascii=False)
+    
+    prompt = (
         "Você é um especialista em anotação sintática em Grego Antigo no padrão AGDT / Arethusa.\n"
-        f'Analise a sentença: "{text_sent}"\n\n'
+        "Analise a sentença: " + str(text_sent) + "\n\n"
         "Abaixo está a lista de tokens com id, form, lemma, head e relation atuais:\n"
-        f"{json.dumps(tokens_payload, ensure_ascii=False)}\n\n"
+        + str_payload + "\n\n"
         "Instruções de Ajuste:\n"
         "1. Se houver coordenação de orações principais com COORD (head=0), NUNCA use PRED. Use PRED_CO para todos os verbos principais coordenados apontando para o nó COORD.\n"
         "2. Agente da passiva (ὑπό + Genitivo) deve ter a preposição como AuxP e o termo regido como OBJ.\n"
@@ -1455,6 +1488,34 @@ prompt = (
         "Retorne APENAS um array JSON válido no formato:\n"
         '[ {"id": 1, "head": 7, "rel": "SBJ"}, ... ]'
     )
+
+    for modelo in CASCATA_MODELOS:
+        payload = {
+            "model": modelo,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0
+        }
+
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            if response.status_code == 200:
+                res_json = response.json()
+                content = res_json['choices'][0]['message']['content']
+                content_clean = content.replace("```json", "").replace("```", "").strip()
+                corrections = json.loads(content_clean)
+                
+                corr_map = {item["id"]: item for item in corrections}
+                for w in words:
+                    if w["id"] in corr_map:
+                        w["new_head"] = corr_map[w["id"]]["head"]
+                        w["head"] = corr_map[w["id"]]["head"]
+                        w["new_rel"] = corr_map[w["id"]]["rel"]
+                        w["relation"] = corr_map[w["id"]]["rel"]
+                return words
+        except Exception:
+            continue
+
+    return words
 
 
 def converter_sentenca(sent):
