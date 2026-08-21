@@ -1107,40 +1107,94 @@ def sanar_nos_orfaos(words):
         elif (w.get("new_head") is None or w.get("new_head") == 0) and w.get("new_rel") not in {"COORD", "PRED", "AuxK"}:
             w["new_head"] = predicado_principal["id"]
             
+def eh_predicado_potencial(w):
+    """
+    Identifica se a palavra pode atuar como predicado oracional no AGDT.
+    """
+    upos = w.get("upos", "")
+    feats = w.get("feats", "")
+    xpos = w.get("xpos", "")
+    lemma = normalizar(w.get("lemma", ""))
+    text = normalizar(w.get("text", ""))
+
+    # Verbos impessoais e especiais
+    if lemma in {"χρή", "δεῖ"} or text in {"χρή", "χρη", "δει"}:
+        return True
+
+    if upos in {"VERB", "AUX"}:
+        # Ignora infinitivos e participios puros (exceto se capturados como predicados principais)
+        if "VerbForm=Inf" not in feats and "VerbForm=Part" not in feats:
+            return True
+        # Casos em que o xpos indica forma finita
+        if len(xpos) > 4 and xpos[4] in {"i", "s", "o", "m"}:
+            return True
+
+    return False
+
+
 def sanitizar_coordenacao_predicados(words):
     """
-    Elimina a assimetria PRED + PRED_CO.
-    Se existe um COORD e um PRED_CO na oração, força todos os PREDs a virarem PRED_CO
-    e aponta para o COORD raiz.
+    Garante a regra de ouro do AGDT:
+    Nunca permite a coexistência de PRED e PRED_CO na mesma estrutura de coordenação.
+    Se existir coordenação entre predicados, TODOS passam a ser PRED_CO e apontam para o COORD.
     """
-    # 1. Localiza a conjunção/coordenador principal
-    coord_node = next((w for w in words if w.get("new_rel") == "COORD" or w.get("deprel", "").startswith("cc")), None)
+    predicados = [w for w in words if eh_predicado_potencial(w) or w.get("new_rel") in {"PRED", "PRED_CO"}]
     
-    if not coord_node:
+    if len(predicados) < 2:
         return
 
-    # 2. Verifica se há algum PRED_CO já identificado
-    tem_pred_co = any(w.get("new_rel") == "PRED_CO" for w in words)
-    
-    # 3. Se há um COORD e ao menos um PRED_CO, nenhum verbo pode ficar como PRED solto
-    if tem_pred_co or len([w for w in words if eh_predicado_potencial(w)]) >= 2:
+    # Procura um elemento de coordenação (COORD) já definido ou conjunção CCONJ/PART entre os predicados
+    coord_node = next((w for w in words if w.get("new_rel") == "COORD"), None)
+
+    if not coord_node:
+        coord_node = next(
+            (w for w in words if w.get("deprel", "").startswith("cc") or w.get("upos") in {"CCONJ"}),
+            None
+        )
+
+    if coord_node:
         coord_node["new_rel"] = "COORD"
         coord_node["new_head"] = 0
         coord_node["relation"] = "COORD"
         coord_node["head"] = 0
         coord_node["lock"] = True
 
+        for p in predicados:
+            p["new_rel"] = "PRED_CO"
+            p["new_head"] = coord_node["id"]
+            p["relation"] = "PRED_CO"
+            p["head"] = coord_node["id"]
+            p["lock"] = True
+
+        # Desativa outras partículas para não competirem como COORD
         for w in words:
-            # Se a palavra é um predicado potencial ou está marcada como PRED/PRED_CO
-            if (w.get("new_rel") in {"PRED", "PRED_CO"} or eh_predicado_potencial(w)) and w["id"] != coord_node["id"]:
-                # Força a conversão em PRED_CO
+            if w["id"] != coord_node["id"] and w.get("upos") in {"CCONJ", "PART"}:
+                if w.get("new_rel") in {"COORD"}:
+                    w["new_rel"] = "AuxY"
+                    w["new_head"] = coord_node["id"]
+
+
+def garantir_simetria_coord_predicados(words):
+    """
+    Passagem final de validação estrutural.
+    Se houver um nó COORD na sentença, varre e converte qualquer PRED residual para PRED_CO.
+    """
+    coord_node = next((w for w in words if w.get("new_rel") == "COORD"), None)
+    
+    if not coord_node:
+        return
+
+    # Procura se há algum PRED_CO na oração apontando para o COORD
+    tem_pred_co = any(w.get("new_rel") == "PRED_CO" and str(w.get("new_head")) == str(coord_node["id"]) for w in words)
+
+    if tem_pred_co:
+        for w in words:
+            # Qualquer palavra marcada como PRED ou identificada como predicado que não seja o próprio COORD
+            if w.get("new_rel") == "PRED" or (eh_predicado_potencial(w) and w["id"] != coord_node["id"]):
                 w["new_rel"] = "PRED_CO"
                 w["new_head"] = coord_node["id"]
-                
-                # Sincroniza as chaves originais para evitar que geradores de XML desatualizados peguem o Stanza antigo
                 w["relation"] = "PRED_CO"
                 w["head"] = coord_node["id"]
-                w["lock"] = True
 
 def converter_sentenca(sent):
     words = construir_words(sent)
@@ -1165,15 +1219,14 @@ def converter_sentenca(sent):
     aplicar_ocomp_participio(words)
     aplicar_copula(words)
 
-    # 4. Coordenação Genérica e Partículas
+    # 4. Coordenação e Regra de Ouro
     aplicar_coordenacao_predicados_generico(words)
     aplicar_coordenacao(words)
-    # ENTRADA DA REGRA DE OURO: Unifica PRED + PRED_CO -> COORD
-    sanitizar_coordenacao_predicados(words)
+    sanitizar_coordenacao_predicados(words)  # Regra de ouro
     aplicar_oute_correlativo(words)
     aplicar_conectivos_correlativos(words)
     
-    # 5. Sintagmas Preposicionais e Focalizadores Nominais
+    # 5. Sintagmas Preposicionais e Focalizadores
     aplicar_auxp_generico(words)
     aplicar_focalizadores_auxz_generico(words)
     aplicar_auxiliares_especiais(words)
@@ -1182,7 +1235,10 @@ def converter_sentenca(sent):
     sanitizar_arvore_agdt(words)
     sanar_nos_orfaos(words)
 
-    # 7. Preenchimento Final e Atribuições Finais
+    # 7. VALIDAÇÃO FINAL DA REGRA DE OURO (Garante PRED_CO simétrico em toda a sentença)
+    garantir_simetria_coord_predicados(words)
+
+    # 8. Mapeamento final de heads e relações
     for w in words:
         if w.get("new_head") is None: 
             w["new_head"] = w.get("head", 0)
@@ -1193,21 +1249,9 @@ def converter_sentenca(sent):
         if w.get("new_rel") == "AuxK": 
             w["new_head"] = 0
 
-        # Mapeamento de infinitivos residuais
-        xpos = w.get("xpos") or ""
-        feats = w.get("feats") or ""
-        is_inf = "VerbForm=Inf" in feats or (len(xpos) > 4 and xpos[4] == "n") or (len(xpos) > 2 and xpos[2] == "n")
-        
-        if is_inf and w["new_rel"] in {"PRED", "PRED_CO"}:
-            w["new_rel"] = "OBJ" if w["new_rel"] == "PRED" else "OBJ_CO"
-
         # Trava anti-loop final
         if str(w.get("new_head")) == str(w.get("id")):
             w["new_head"] = 0
-
-    for w in words:
-        if w.get("upos") in {"VERB", "AUX"} or eh_predicado_potencial(w):
-            print(f"Palavra: {w['text']} | Rel: {w.get('new_rel')} | Head: {w.get('new_head')}")
 
     return {"text": sent.text, "words": words}
 
