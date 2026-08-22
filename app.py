@@ -1627,6 +1627,7 @@ def converter_sentenca(sent):
     sanitizar_coordenacao_predicados(words)  # Regra de ouro
     aplicar_oute_correlativo(words)
     aplicar_conectivos_correlativos(words)
+    reestruturar_coordenacao_atributos(words)
     
     # 5. Sintagmas Preposicionais e Focalizadores
     aplicar_auxp_generico(words)
