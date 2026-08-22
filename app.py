@@ -1552,41 +1552,46 @@ def resolver_escopo_acusativos_infinitivos(words):
 def resolver_artigo_participio_e_infinitivo(words):
     """
     Regra Genérica AGDT:
-    1. Liga o artigo determinante ao nome/particípio imediatamente seguinte como ATR.
-    2. Se há um infinitivo na oração, o acusativo articulado vira SBJ do infinitivo.
+    1. Força qualquer artigo determinante a ser ATR da palavra seguinte.
+    2. Se há infinitivo, o termo articulado vira SBJ do infinitivo.
     """
+    artigos_formas = {
+        "ὁ", "ἡ", "τό", "τὸ", "τον", "τὸν", "τη̄ν", "τὴν", 
+        "τοῦ", "τῆς", "τῷ", "τῇ", "οἱ", "αἱ", "τά", "τὰ", "τούς", "τοὺς"
+    }
+    
+    # Localiza o infinitivo na sentença
     infinitivos = [
         w for w in words 
         if "VerbForm=Inf" in w.get("feats", "") 
-        or w.get("form", "").endswith(("ειν", "σθαι", "εναι", "αι"))
+        or normalizar(w.get("form", "")).endswith(("ειν", "σθαι", "εναι", "αι"))
     ]
 
     for i, w in enumerate(words):
-        # 1. Identifica qualquer forma do artigo determinante (ὁ, τό, τὸν, etc.)
-        if w.get("lemma") == "ὁ" or w.get("form") in {"ὁ", "ἡ", "τό", "τὸ", "τον", "τὸν", "τη̄ν", "τὴν", "τοῦ", "τῆς", "τῷ", "τῇ"}:
+        form_norm = normalizar(w.get("form", "").lower())
+        
+        # Se a palavra for um artigo reconhecido pela forma
+        if form_norm in {normalizar(a) for a in artigos_formas}:
             idx_next = i + 1
             if idx_next < len(words):
                 w_next = words[idx_next]
 
-                # O artigo SEMPRE é ATR da palavra seguinte (a menos que a seguinte seja outro artigo ou pontuação)
-                if w_next.get("upos") != "PUNCT" and w_next.get("lemma") != "ὁ":
-                    
-                    # 1. Artigo vira ATR do substantivo/particípio
-                    w["head"] = w_next["id"]
-                    w["new_head"] = w_next["id"]
-                    w["relation"] = "ATR"
-                    w["new_rel"] = "ATR"
-                    w["lock"] = True  # IMPEDE a LLM de mudar para OBJ!
+                # 1. Artigo vira ATR do próximo token e ganha LOCK
+                w["head"] = w_next["id"]
+                w["new_head"] = w_next["id"]
+                w["relation"] = "ATR"
+                w["new_rel"] = "ATR"
+                w["lock"] = True
 
-                    # 2. Se há infinitivo (ex: φυγεῖν), o substantivo/particípio articulado vira SBJ do infinitivo
-                    if infinitivos:
-                        inf_regente = infinitivos[0]
-                        if w_next["id"] != inf_regente["id"]:
-                            w_next["head"] = inf_regente["id"]
-                            w_next["new_head"] = inf_regente["id"]
-                            w_next["relation"] = "SBJ"
-                            w_next["new_rel"] = "SBJ"
-                            w_next["lock"] = True
+                # 2. O próximo token vira SBJ do infinitivo e ganha LOCK
+                if infinitivos:
+                    inf_regente = infinitivos[0]
+                    if w_next["id"] != inf_regente["id"]:
+                        w_next["head"] = inf_regente["id"]
+                        w_next["new_head"] = inf_regente["id"]
+                        w_next["relation"] = "SBJ"
+                        w_next["new_rel"] = "SBJ"
+                        w_next["lock"] = True
 
 def reestruturar_coordenacao_atributos(words):
     """
@@ -1755,7 +1760,6 @@ def converter_sentenca(sent):
     garantir_predicado_raiz(words)
     aplicar_regras_infinitivo(words)
     resolver_escopo_acusativos_infinitivos(words) # <-- INSERIR AQUI
-    resolver_artigo_participio_e_infinitivo(words)
     aplicar_estrutura_aci_e_disjuncao(words)
     aplicar_participios_substantivados(words)
     aplicar_ocomp_participio(words)
@@ -1775,6 +1779,7 @@ def converter_sentenca(sent):
     aplicar_conectivos_correlativos(words)
 
     resolver_infinitivo_articulado(words)   # 1º: Resolve e TRAVA o sujeito (τὸ βάλλεσθαι)
+    resolver_artigo_participio_e_infinitivo(words)
     resolver_kai_enfatico(words)             # 2º: Resolve e TRAVA o καὶ AuxZ
     reestruturar_coordenacao_atributos(words)
     resolver_escopo_acusativos_infinitivos(words)
