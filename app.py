@@ -1725,15 +1725,17 @@ else:
 
 if st.button("Processar Sentença", type="primary"):
     with st.spinner("Analisando gramática e executando refinamento..."):
-        # Garante que o texto seja processado pelo Stanza gerando a variável 'doc'
+        # 1. Processa a frase no Stanza e executa o pipeline de conversão
         doc = nlp(entrada_texto)
-        
-        # Passa a sentença do doc para o pipeline
         resultado = converter_sentenca(doc.sentences[0])
         
+        # 2. GERA AS VARIÁVEIS xml_str E conllu_str (Corrige o NameError na linha 1752)
+        xml_str = gerar_agdt_xml([resultado])
+        conllu_str = gerar_conllu([resultado])
+
         st.success("Análise concluída!")
         
-        # 2. ACRESCENTE ESTE BLOCO AQUI (Abaixo do st.success e acima dos gráficos/XML):
+        # 3. Legenda com o modelo utilizado
         modelo = resultado.get("modelo_usado")
         if modelo:
             st.caption(f"🤖 **Refinamento semântico executado por:** `{modelo}`")
@@ -1741,9 +1743,8 @@ if st.button("Processar Sentença", type="primary"):
             st.caption("⚡ **Processado exclusivamente pelas regras locais (sem LLM).**")
 
         st.subheader("Resultado da Anotação Sintática")
-        
-        # 3. Seu código existente para exibir a árvore/XML continua daqui para baixo...
 
+        # 4. Abas com Preview e Download
         tab_xml, tab_conllu = st.tabs(["📄 XML Arethusa (AGDT)", "📝 CoNLL-U (UD)"])
 
         with tab_xml:
