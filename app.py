@@ -1987,6 +1987,31 @@ def proibir_pred_em_formas_nao_finitas(words):
             
             set_v(w, "lock", True)
 
+def travar_preposicoes_como_auxp(words):
+    """
+    Usa a constante PREPOSICOES_GREGAS para forçar a relação 'AuxP'
+    e aplicar 'lock=True', impedindo que preposições virem SBJ ou PRED.
+    """
+    def get_v(w, k):
+        return w.get(k) if isinstance(w, dict) else getattr(w, k, None)
+
+    def set_v(w, k, val):
+        if isinstance(w, dict):
+            w[k] = val
+        else:
+            setattr(w, k, val)
+
+    for w in words:
+        form = str(get_v(w, "form") or get_v(w, "text") or "").strip()
+        lemma = str(get_v(w, "lemma") or "").strip()
+        postag = str(get_v(w, "postag") or "").lower()
+
+        # Se o token for uma preposição conhecida ou tiver postag 'r' (preposição)
+        if form in PREPOSICOES_GREGAS or lemma in PREPOSICOES_GREGAS or postag.startswith("r"):
+            set_v(w, "relation", "AuxP")
+            set_v(w, "new_rel", "AuxP")
+            set_v(w, "lock", True)
+
 def converter_sentenca(sent):
     words = construir_words(sent)
     
@@ -2034,6 +2059,8 @@ def converter_sentenca(sent):
     resolver_predicativos_de_estado_e_copula(words)
     # NOVÍSSIMA REGRA DE OURO DA AGDT:
     proibir_pred_em_formas_nao_finitas(words)  # <-- INSERIR AQUI!
+    travar_preposicoes_como_auxp(words)  # <-- Usa sua constante existente!
+    
     
     # 5. Sintagmas Preposicionais e Focalizadores
     aplicar_auxp_generico(words)
