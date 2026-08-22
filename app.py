@@ -8,29 +8,29 @@ import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
 # ==============================================================================
-# 1. INTERFACE DO STREAMLIT (BARRA LATERAL - SIDEBAR)
+# 1. INTERFACE DO STREAMLIT (BARRA LATERAL - SIDEBAR) soh no comentário
 # ==============================================================================
 
-st.sidebar.title("Configurações do Parser")
+# st.sidebar.title("Configurações do Parser")
 
 # Seletor da LLM na barra lateral do app Streamlit
-st.sidebar.markdown("### Refinamento Semântico (LLM)")
+# st.sidebar.markdown("### Refinamento Semântico (LLM)")
 
-opcoes_modelos = {
-    "Claude 3.5 Haiku (Rápido, Barato e Preciso)": "anthropic/claude-3.5-haiku",
-    "Claude 3.5 Sonnet (Máxima Precisão)": "anthropic/claude-3.5-sonnet",
-    "Gemini 2.5 Flash (Recomendado)": "google/gemini-2.5-flash",
-    "Gemini 2.5 Pro (Análise Profunda)": "google/gemini-2.5-pro",
-    "GPT-4o Mini (Econômico)": "openai/gpt-4o-mini"
-}
+# opcoes_modelos = {
+#    "Claude 3.5 Haiku (Rápido, Barato e Preciso)": "anthropic/claude-3.5-haiku",
+#   "Claude 3.5 Sonnet (Máxima Precisão)": "anthropic/claude-3.5-sonnet",
+#    "Gemini 2.5 Flash (Recomendado)": "google/gemini-2.5-flash",
+#    "Gemini 2.5 Pro (Análise Profunda)": "google/gemini-2.5-pro",
+#    "GPT-4o Mini (Econômico)": "openai/gpt-4o-mini"
+# }
 
-modelo_rotulo = st.sidebar.selectbox(
-    "Escolha o Modelo do OpenRouter:",
-    options=list(opcoes_modelos.keys())
-)
+# modelo_rotulo = st.sidebar.selectbox(
+#    "Escolha o Modelo do OpenRouter:",
+#   options=list(opcoes_modelos.keys())
+# )
 
 # Guarda o modelo escolhido na memória da sessão para o converter_sentenca usar
-st.session_state["modelo_llm"] = opcoes_modelos[modelo_rotulo]
+# st.session_state["modelo_llm"] = opcoes_modelos[modelo_rotulo]
 
 # ============================================================
 # 1. CONFIGURAÇÃO DA PÁGINA STREAMLIT
@@ -1595,8 +1595,9 @@ def converter_sentenca(sent):
     # 7. VALIDAÇÃO FINAL DA REGRA DE OURO
     garantir_simetria_coord_predicados(words)
 
-    # Guarda uma cópia da árvore gerada estritamente pelo seu código Python
+    # 1. Antes da API: Guarda a cópia local e inicializa a variável modelo_usado
     words_locais_copia = [dict(w) for w in words]
+    modelo_usado = None
 
     # ------------------------------------------------------------------
     # CHAMADA DA API OPENROUTER (Lê dos Secrets do Streamlit automaticamente)
@@ -1606,7 +1607,7 @@ def converter_sentenca(sent):
     if api_key:
         words = refinar_arvore_com_openrouter_cascata(words, sent.text, api_key)
 
-    # Restaura o comportamento estrutural correto onde a LLM regrediu
+    # 3. Depois da API: Salvaguarda dos sujeitos
         words = preservar_sujeitos_principais_locais(words_locais_copia, words)
 
     # REBALANCEAMENTO DE ESCOPO (Impede adjuntos de "vazarem" para a oração anterior)
@@ -1724,6 +1725,8 @@ else:
 
 if st.button("Processar Sentença", type="primary"):
     with st.spinner("Analisando gramática e executando refinamento..."):
+        # Garante que o texto seja processado pelo Stanza gerando a variável 'doc'
+        doc = nlp(texto_input) 
         
         # 1. Executa o seu pipeline
         resultado = converter_sentenca(doc.sentences[0])
