@@ -1565,7 +1565,7 @@ def resolver_artigo_participio_e_infinitivo(words):
         "τοῦ", "τῆς", "τῷ", "τῇ", "οἱ", "αἱ", "τά", "τὰ", "τούς", "τοὺς"
     }
 
-    # Procura infinitivos por morfologia OU por terminação grega típica
+    # Busca o infinitivo por morfologia (feats) OU por terminação verbal grega
     infinitivos = []
     for w in words:
         texto = (w.get("form") or w.get("text") or w.get("word") or "").lower()
@@ -1582,14 +1582,14 @@ def resolver_artigo_participio_e_infinitivo(words):
             if idx_next < len(words):
                 w_next = words[idx_next]
 
-                # 1. Artigo vira ATR da palavra seguinte em TODAS as chaves
+                # 1. Artigo vira ATR da palavra seguinte (preenche todas as chaves)
                 w["head"] = w_next["id"]
                 w["new_head"] = w_next["id"]
                 w["relation"] = "ATR"
                 w["new_rel"] = "ATR"
                 w["lock"] = True
 
-                # 2. Palavra seguinte vira SBJ do infinitivo em TODAS as chaves
+                # 2. Palavra seguinte vira SBJ do infinitivo (preenche todas as chaves)
                 if infinitivos:
                     inf_regente = infinitivos[0]
                     if w_next["id"] != inf_regente["id"]:
@@ -1808,11 +1808,11 @@ def converter_sentenca(sent):
     # REBALANCEAMENTO DE ESCOPO (Impede adjuntos de "vazarem" para a oração anterior)
     rebalancear_dependentes_por_fronteira_coord(words)    
 
-    
     # 1. Guarda a cópia da árvore gerada estritamente pelas SUAS REGRAS LOCAIS
     words_locais_copia = [dict(w) for w in words]
     modelo_usado = None
 
+    # PRINT DE DEPURAÇÃO SEGURO (Mínimo risco de KeyError)
     print("=== DEPURACAO PALAVRAS 5, 6 E 7 APÓS REGRAS LOCAIS ===")
     for w in words:
         w_id = w.get("id") if isinstance(w, dict) else getattr(w, "id", None)
