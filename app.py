@@ -878,6 +878,90 @@ def aplicar_infinitivo_substantivado_artigo(words):
                     de["new_head"] = verbo_matriz["id"]
                     de["lock"] = True
 
+def resolver_infinitivo_articulado(words):
+    """
+    Regra Genérica AGDT: 
+    O artigo neutro ('τὸ', 'toũ', 'tῷ', etc.) torna o infinitivo o núcleo 
+    do sintagma nominal. O infinitivo passa a ser SBJ ou OBJ do verbo finito 
+    regente daquela oração específica (não necessariamente o PRED principal).
+    """
+    # Lista todos os verbos finitos da frase
+    verbos_finitos = [
+        w for w in words 
+        if w.get("upos") == "VERB" and "VerbForm=Inf" not in w.get("feats", "")
+    ]
+    
+    if not verbos_finitos:
+        return
+
+    for i, w in enumerate(words):
+        # Encontra o artigo neutro 'τὸ' (ou flexões de artigo neutro singular)
+        if w.get("lemma") == "ὁ" and w.get("form") in {"τὸ", "τό", "τοῦ", "τῷ"}:
+            
+            # Procura o infinitivo no escopo imediato (1 a 3 palavras à frente)
+            for j in range(i + 1, min(i + 4, len(words))):
+                w_target = words[j]
+                if "VerbForm=Inf" in w_target.get("feats", "") or w_target.get("upos") == "VERB":
+                    
+                    # 1. O artigo é ATR do infinitivo
+                    w["head"] = w_target["id"]
+                    w["new_head"] = w_target["id"]
+                    w["relation"] = "ATR"
+                    w["new_rel"] = "ATR"
+                    w["lock"] = True
+
+                    # 2. Encontra o verbo finito regente MAIS PRÓXIMO (da mesma oração)
+                    verbo_regente = min(
+                        verbos_finitos, 
+                        key=lambda v: abs(v["id"] - w_target["id"])
+                    )
+
+                    # 3. O infinitivo articulado vira dependente desse verbo regente específico
+                    # Se o artigo for Nominativo ('τὸ'), tende a SBJ; se oblíquo, tende a OBJ/ADV
+                    relacao_inf = "SBJ" if w.get("form") in {"τὸ", "τό"} else "OBJ"
+                    
+                    w_target["head"] = verbo_regente["id"]
+                    w_target["new_head"] = verbo_regente["id"]
+                    w_target["relation"] = relacao_inf
+                    w_target["new_rel"] = relacao_inf
+                    w_target["lock"] = True
+                    break
+
+def resolver_kai_enfatico(words):
+    """
+    Se 'καὶ' antecede um acusativo (ex: ἀποδημίαν) e o token anterior 
+    não é um acusativo coordenável, trata o 'καὶ' como AuxZ (enfático).
+    """
+    for i, w in enumerate(words):
+        if w.get("lemma") in {"καί", "καὶ"}:
+            idx_prev = i - 1
+            idx_next = i + 1
+
+            if idx_next < len(words):
+                w_next = words[idx_next]
+                # Se o elemento seguinte é um substantivo/acusativo
+                if w_next.get("upos") in {"NOUN", "PROPN"} or "Case=Acc" in w_next.get("feats", ""):
+                    # Se o elemento anterior era um complemento instrumental (dativo) ou verbo/infinitivo
+                    w_prev = words[idx_prev] if idx_prev >= 0 else {}
+                    if w_prev.get("upos") == "VERB" or "Case=Dat" in w_prev.get("feats", "") or w_prev.get("relation") == "ADV":
+                        
+                        # 'καὶ' vira AuxZ do substantivo seguinte
+                        w["head"] = w_next["id"]
+                        w["new_head"] = w_next["id"]
+                        w["relation"] = "AuxZ"
+                        w["new_rel"] = "AuxZ"
+                        w["lock"] = True
+
+                        # O substantivo passa a ser OBJ direto do verbo principal
+                        verbos = [v for v in words if v.get("relation") in {"PRED", "PRED_CO"}]
+                        if verbos:
+                            w_next["head"] = verbos[0]["id"]
+                            w_next["new_head"] = verbos[0]["id"]
+                            w_next["relation"] = "OBJ"
+                            w_next["new_rel"] = "OBJ"
+                            w_next["lock"] = True
+
+
 
 def aplicar_coordenacao_sujeito_neutro(words):
     for i, w in enumerate(words):
@@ -1628,6 +1712,9 @@ def converter_sentenca(sent):
     aplicar_oute_correlativo(words)
     aplicar_conectivos_correlativos(words)
     reestruturar_coordenacao_atributos(words)
+    resolver_infinitivo_articulado(words)  # <-- Aqui!
+    resolver_kai_enfatico(words)
+    resolver_escopo_acusativos_infinitivos(words)
     
     # 5. Sintagmas Preposicionais e Focalizadores
     aplicar_auxp_generico(words)
