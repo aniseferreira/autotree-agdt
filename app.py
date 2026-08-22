@@ -1552,37 +1552,40 @@ def resolver_escopo_acusativos_infinitivos(words):
 def resolver_artigo_participio_e_infinitivo(words):
     """
     Regra Genérica AGDT:
-    1. Liga o artigo ao particípio/substantivo seguinte (ATR).
-    2. Se há um infinitivo na oração regido por verbo impessoal/finito, 
-       os acusativos da oração dependem do infinitivo e não do verbo matriz.
+    1. Liga o artigo determinante ao nome/particípio imediatamente seguinte como ATR.
+    2. Se há um infinitivo na oração, o acusativo articulado vira SBJ do infinitivo.
     """
-    infinitivos = [w for w in words if "VerbForm=Inf" in w.get("feats", "") or w.get("form", "").endswith(("ειν", "σθαι"))]
-    
+    infinitivos = [
+        w for w in words 
+        if "VerbForm=Inf" in w.get("feats", "") 
+        or w.get("form", "").endswith(("ειν", "σθαι", "εναι", "αι"))
+    ]
+
     for i, w in enumerate(words):
-        # 1. Regra Genérica Artigo + Particípio/Substantivo
-        if w.get("lemma") == "ὁ":
+        # 1. Identifica qualquer forma do artigo determinante (ὁ, τό, τὸν, etc.)
+        if w.get("lemma") == "ὁ" or w.get("form") in {"ὁ", "ἡ", "τό", "τὸ", "τον", "τὸν", "τη̄ν", "τὴν", "τοῦ", "τῆς", "τῷ", "τῇ"}:
             idx_next = i + 1
             if idx_next < len(words):
                 w_next = words[idx_next]
-                # Se o token seguinte for particípio, substantivo ou adjetivo
-                if w_next.get("upos") in {"NOUN", "VERB", "ADJ", "PRON"} or "VerbForm=Part" in w_next.get("feats", ""):
+
+                # O artigo SEMPRE é ATR da palavra seguinte (a menos que a seguinte seja outro artigo ou pontuação)
+                if w_next.get("upos") != "PUNCT" and w_next.get("lemma") != "ὁ":
+                    
+                    # 1. Artigo vira ATR do substantivo/particípio
                     w["head"] = w_next["id"]
                     w["new_head"] = w_next["id"]
                     w["relation"] = "ATR"
                     w["new_rel"] = "ATR"
-                    w["lock"] = True
+                    w["lock"] = True  # IMPEDE a LLM de mudar para OBJ!
 
-                    # 2. Se existe infinitivo, o particípio/acusativo vira dependente do infinitivo (head = infinitivo)
+                    # 2. Se há infinitivo (ex: φυγεῖν), o substantivo/particípio articulado vira SBJ do infinitivo
                     if infinitivos:
                         inf_regente = infinitivos[0]
-                        # Impede que o particípio dependa do verbo principal (ex: δεῖ)
                         if w_next["id"] != inf_regente["id"]:
                             w_next["head"] = inf_regente["id"]
                             w_next["new_head"] = inf_regente["id"]
-                            # Caso/função: Sujeito ou Objeto do infinitivo
-                            rel = "SBJ" if "Case=Acc" in w_next.get("feats", "") or w_next.get("upos") in {"NOUN", "VERB"} else "OBJ"
-                            w_next["relation"] = rel
-                            w_next["new_rel"] = rel
+                            w_next["relation"] = "SBJ"
+                            w_next["new_rel"] = "SBJ"
                             w_next["lock"] = True
 
 def reestruturar_coordenacao_atributos(words):
