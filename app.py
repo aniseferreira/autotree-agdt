@@ -1442,28 +1442,28 @@ def resolver_escopo_acusativos_infinitivos(words):
                 w["new_rel"] = "OBJ"
                 w["relation"] = "OBJ"
 
-def preservar_sujeitos_principais_locais(words_locais, words_pos_llm):
+def aplicar_refinamento_llm_com_trava_rigida(words_locais, corrections_llm):
     """
-    Garantia Sintática Genérica:
-    Se as suas REGRAS LOCAIS (Python) definiram um nó como SBJ do verbo principal,
-    e a LLM o rebaixou para dependente de um infinitivo subordinado, restaura a versão local.
+    Garantia Absoluta:
+    A LLM só pode alterar um nó se ele NÃO foi travado (w['lock'] = True) 
+    pelas regras locais do Python.
     """
-    mapa_local = {w["id"]: (w.get("head"), w.get("relation")) for w in words_locais}
+    corr_map = {item["id"]: item for item in corrections_llm}
 
-    for w in words_pos_llm:
-        head_local, rel_local = mapa_local.get(w["id"], (None, None))
-        
-        # Se a sua regra local definiu que este nó era o Sujeito (SBJ)
-        if rel_local == "SBJ":
-            head_llm = w.get("head")
-            # Se a LLM alterou o apontamento que suas regras locais definiram
-            if head_llm != head_local:
-                w["head"] = head_local
-                w["new_head"] = head_local
-                w["relation"] = "SBJ"
-                w["new_rel"] = "SBJ"
+    for w in words_locais:
+        # Se o nó foi travado pelas regras locais, a LLM É IGNORADA NELE
+        if w.get("lock"):
+            continue
+            
+        # Se o nó estava livre e a LLM sugeriu correção, aplica
+        if w["id"] in corr_map:
+            sugestao = corr_map[w["id"]]
+            w["new_head"] = sugestao["head"]
+            w["head"] = sugestao["head"]
+            w["new_rel"] = sugestao["rel"]
+            w["relation"] = sugestao["rel"]
 
-    return words_pos_llm
+    return words_locais
 
 def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     """Refina a árvore via OpenRouter e retorna (words, modelo_utilizado)."""
@@ -1482,7 +1482,6 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
         "openai/gpt-4o-mini"
     ]
 
-    # Reconstrução segura da string da sentença caso text_sent não venha como string
     if not isinstance(text_sent, str):
         text_sent = " ".join([str(w.get("text", "")) for w in words])
 
@@ -1526,20 +1525,19 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
                 res_json = response.json()
                 content = res_json['choices'][0]['message']['content']
                 content_clean = content.replace("```json", "").replace("```", "").strip()
+                
+                # --- AQUI ENTRAL A MUDANÇA ---
                 corrections = json.loads(content_clean)
                 
-                corr_map = {item["id"]: item for item in corrections}
-                for w in words:
-                    if w["id"] in corr_map:
-                        w["new_head"] = corr_map[w["id"]]["head"]
-                        w["head"] = corr_map[w["id"]]["head"]
-                        w["new_rel"] = corr_map[w["id"]]["rel"]
-                        w["relation"] = corr_map[w["id"]]["rel"]
+                # Aplica as correções respeitando estritamente o que o Python já travou (lock)
+                words = aplicar_refinamento_llm_com_trava_rigida(words, corrections)
                 
                 return words, modelo
+                # -----------------------------
         except Exception:
             continue
 
+    # Mantém esta linha no final! (Caso nenhum modelo responda)
     return words, None
 
 
@@ -1594,29 +1592,25 @@ def converter_sentenca(sent):
     
     # 7. VALIDAÇÃO FINAL DA REGRA DE OURO
     garantir_simetria_coord_predicados(words)
-   
+
+    # REBALANCEAMENTO DE ESCOPO (Impede adjuntos de "vazarem" para a oração anterior)
+    rebalancear_dependentes_por_fronteira_coord(words)    
+
 
     # 1. Guarda a cópia da árvore gerada estritamente pelas SUAS REGRAS LOCAIS
     words_locais_copia = [dict(w) for w in words]
     modelo_usado = None
 
-    # 2. Chama a API do OpenRouter em Cascata
+# 2. Chama a API do OpenRouter
     api_key = st.secrets.get("OPENROUTER_API_KEY", "")
     if api_key:
         texto_frase = getattr(sent, 'text', '')
-        words, modelo_usado = refinar_arvore_com_openrouter_cascata(words, sent.text, api_key)
-        
-        # 3. A salvaguarda SÓ roda se uma LLM respondeu com sucesso!
-        if modelo_usado:
-            words = preservar_sujeitos_principais_locais(words_locais_copia, words)
+        words, modelo_usado = refinar_arvore_com_openrouter_cascata(words, texto_frase, api_key)
 
-    # REBALANCEAMENTO DE ESCOPO (Impede adjuntos de "vazarem" para a oração anterior)
-    rebalancear_dependentes_por_fronteira_coord(words)    
-
-    # 8. Mapeamento final de heads e relações (Apenas se não estiver travado por regra)
+    # 3. Mapeamento final (Passo 8)
     for w in words:
         if w.get("lock"):
-            continue  # Impede que o mapeador básico sobrescreva as correções!
+            continue  # Garante 100% que nada sobrescreve o nó travado pelo Python
             
         if w.get("new_head") is None: 
             w["new_head"] = w.get("head", 0)
@@ -1630,8 +1624,8 @@ def converter_sentenca(sent):
         if str(w.get("new_head")) == str(w.get("id")):
             w["new_head"] = 0
 
-    # RETORNO ATUALIZADO: Inclui o modelo_usado no dicionário final
     return {"text": sent.text, "words": words, "modelo_usado": modelo_usado}
+
 
 def gerar_agdt_xml(sentences):
     root = ET.Element("treebank")
