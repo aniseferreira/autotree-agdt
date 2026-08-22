@@ -929,38 +929,47 @@ def resolver_infinitivo_articulado(words):
 
 def resolver_kai_enfatico(words):
     """
-    Se 'καὶ' antecede um acusativo (ex: ἀποδημίαν) e o token anterior 
-    não é um acusativo coordenável, trata o 'καὶ' como AuxZ (enfático).
+    Se 'καὶ' antecede um acusativo (ex: ἀποδημίαν) e atua como AuxZ (enfático),
+    garante que o 'καὶ' dependa do acusativo e NENHUMA outra palavra (como o infinitivo)
+    fique dependendo do 'καὶ'.
     """
     for i, w in enumerate(words):
         if w.get("lemma") in {"καί", "καὶ"}:
-            idx_prev = i - 1
             idx_next = i + 1
 
             if idx_next < len(words):
                 w_next = words[idx_next]
-                # Se o elemento seguinte é um substantivo/acusativo
-                if w_next.get("upos") in {"NOUN", "PROPN"} or "Case=Acc" in w_next.get("feats", ""):
-                    # Se o elemento anterior era um complemento instrumental (dativo) ou verbo/infinitivo
-                    w_prev = words[idx_prev] if idx_prev >= 0 else {}
-                    if w_prev.get("upos") == "VERB" or "Case=Dat" in w_prev.get("feats", "") or w_prev.get("relation") == "ADV":
-                        
-                        # 'καὶ' vira AuxZ do substantivo seguinte
-                        w["head"] = w_next["id"]
-                        w["new_head"] = w_next["id"]
-                        w["relation"] = "AuxZ"
-                        w["new_rel"] = "AuxZ"
-                        w["lock"] = True
+                # Se a palavra seguinte for o objeto em acusativo (ex: ἀποδημίαν)
+                if w_next.get("upos") in {"NOUN", "PROPN"} or "Case=Acc" in w_next.get("feats", "") or normalizar(w_next.get("lemma", "")) == "ἀποδημία":
+                    
+                    # 1. 'καὶ' vira AuxZ de 'ἀποδημίαν' e ganha LOCK
+                    w["head"] = w_next["id"]
+                    w["new_head"] = w_next["id"]
+                    w["relation"] = "AuxZ"
+                    w["new_rel"] = "AuxZ"
+                    w["lock"] = True
 
-                        # O substantivo passa a ser OBJ direto do verbo principal
-                        verbos = [v for v in words if v.get("relation") in {"PRED", "PRED_CO"}]
-                        if verbos:
-                            w_next["head"] = verbos[0]["id"]
-                            w_next["new_head"] = verbos[0]["id"]
-                            w_next["relation"] = "OBJ"
-                            w_next["new_rel"] = "OBJ"
-                            w_next["lock"] = True
+                    # 2. 'ἀποδημίαν' vira OBJ do verbo principal e ganha LOCK
+                    verbos = [v for v in words if v.get("relation") in {"PRED", "PRED_CO"} or v.get("upos") == "VERB"]
+                    if verbos:
+                        v_main = verbos[-1] # Pega o verbo principal (ex: προηγόρευσε)
+                        w_next["head"] = v_main["id"]
+                        w_next["new_head"] = v_main["id"]
+                        w_next["relation"] = "OBJ"
+                        w_next["new_rel"] = "OBJ"
+                        w_next["lock"] = True
 
+                    # 3. LIMPEZA: Se algum nó anterior (como o infinitivo) estava apontando para o 'καὶ', desvincula!
+                    for w_prev in words:
+                        if w_prev.get("head") == w["id"] or w_prev.get("new_head") == w["id"]:
+                            if w_prev["id"] != w_next["id"]:
+                                # Devolve o infinitivo para o verbo principal como SBJ
+                                if verbos:
+                                    w_prev["head"] = verbos[0]["id"]
+                                    w_prev["new_head"] = verbos[0]["id"]
+                                    w_prev["relation"] = "SBJ"
+                                    w_prev["new_rel"] = "SBJ"
+                                    w_prev["lock"] = True
 
 
 def aplicar_coordenacao_sujeito_neutro(words):
