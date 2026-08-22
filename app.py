@@ -1699,8 +1699,9 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     }
 
     CASCATA_MODELOS = [
-        "anthropic/claude-3.5-haiku",
-        "google/gemini-2.5-flash",
+        "anthropic/claude-3.5-haiku-20241022",  # ID exato do Claude 3.5 Haiku
+        "anthropic/claude-3-haiku-20240307",    # ID exato do Claude 3 Haiku
+        "google/gemini-2.0-flash-001",          # ID exato do Gemini Flash
         "openai/gpt-4o-mini"
     ]
 
@@ -1742,24 +1743,27 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
         }
 
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            # Aumentamos o timeout para 15s pois a Anthropic às vezes leva 5-8s no primeiro boot
+            response = requests.post(url, headers=headers, json=payload, timeout=15)
+            
             if response.status_code == 200:
                 res_json = response.json()
                 content = res_json['choices'][0]['message']['content']
                 content_clean = content.replace("```json", "").replace("```", "").strip()
                 
-                # --- AQUI ENTRAL A MUDANÇA ---
                 corrections = json.loads(content_clean)
-                
-                # Aplica as correções respeitando estritamente o que o Python já travou (lock)
                 words = aplicar_refinamento_llm_com_trava_rigida(words, corrections)
                 
+                print(f"✅ SUCESSO: Refinado com o modelo -> {modelo}")
                 return words, modelo
-                # -----------------------------
-        except Exception:
+            else:
+                # PRINT ÚNICO E LIMPO NO LOG CASO O MODELO FALHE
+                print(f"⚠️ MODELO {modelo} FALHOU (Status {response.status_code}): {response.text[:150]}")
+
+        except Exception as e:
+            print(f"❌ ERRO EXCEÇÃO no modelo {modelo}: {e}")
             continue
 
-    # Mantém esta linha no final! (Caso nenhum modelo responda)
     return words, None
 
 
