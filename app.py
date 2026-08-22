@@ -1728,7 +1728,7 @@ if st.button("Processar Sentença", type="primary"):
         # Garante que o texto seja processado pelo Stanza gerando a variável 'doc'
         doc = nlp(texto_input) 
         
-        # 1. Executa o seu pipeline
+        # Passa a sentença do doc para o pipeline
         resultado = converter_sentenca(doc.sentences[0])
         
         st.success("Análise concluída!")
