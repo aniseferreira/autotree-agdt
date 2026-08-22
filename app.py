@@ -1549,6 +1549,42 @@ def resolver_escopo_acusativos_infinitivos(words):
                 w["relation"] = "OBJ"
                 w["lock"] = True  # <-- ESTA LINHA IMPEDE QUE A LLM SOBERPONHA O ESCOPO DO ACUSATIVO!
 
+def resolver_artigo_participio_e_infinitivo(words):
+    """
+    Regra Genérica AGDT:
+    1. Liga o artigo ao particípio/substantivo seguinte (ATR).
+    2. Se há um infinitivo na oração regido por verbo impessoal/finito, 
+       os acusativos da oração dependem do infinitivo e não do verbo matriz.
+    """
+    infinitivos = [w for w in words if "VerbForm=Inf" in w.get("feats", "") or w.get("form", "").endswith(("ειν", "σθαι"))]
+    
+    for i, w in enumerate(words):
+        # 1. Regra Genérica Artigo + Particípio/Substantivo
+        if w.get("lemma") == "ὁ":
+            idx_next = i + 1
+            if idx_next < len(words):
+                w_next = words[idx_next]
+                # Se o token seguinte for particípio, substantivo ou adjetivo
+                if w_next.get("upos") in {"NOUN", "VERB", "ADJ", "PRON"} or "VerbForm=Part" in w_next.get("feats", ""):
+                    w["head"] = w_next["id"]
+                    w["new_head"] = w_next["id"]
+                    w["relation"] = "ATR"
+                    w["new_rel"] = "ATR"
+                    w["lock"] = True
+
+                    # 2. Se existe infinitivo, o particípio/acusativo vira dependente do infinitivo (head = infinitivo)
+                    if infinitivos:
+                        inf_regente = infinitivos[0]
+                        # Impede que o particípio dependa do verbo principal (ex: δεῖ)
+                        if w_next["id"] != inf_regente["id"]:
+                            w_next["head"] = inf_regente["id"]
+                            w_next["new_head"] = inf_regente["id"]
+                            # Caso/função: Sujeito ou Objeto do infinitivo
+                            rel = "SBJ" if "Case=Acc" in w_next.get("feats", "") or w_next.get("upos") in {"NOUN", "VERB"} else "OBJ"
+                            w_next["relation"] = rel
+                            w_next["new_rel"] = rel
+                            w_next["lock"] = True
+
 def reestruturar_coordenacao_atributos(words):
     """
     Regra Genérica AGDT:
@@ -1716,6 +1752,7 @@ def converter_sentenca(sent):
     garantir_predicado_raiz(words)
     aplicar_regras_infinitivo(words)
     resolver_escopo_acusativos_infinitivos(words) # <-- INSERIR AQUI
+    resolver_artigo_participio_e_infinitivo(words)
     aplicar_estrutura_aci_e_disjuncao(words)
     aplicar_participios_substantivados(words)
     aplicar_ocomp_participio(words)
