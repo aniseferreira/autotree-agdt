@@ -1932,6 +1932,61 @@ def resolver_predicativos_de_estado_e_copula(words):
                 set_v(w, "new_rel", "PNOM")
                 set_v(w, "lock", True)
 
+def proibir_pred_em_formas_nao_finitas(words):
+    """
+    Regra de Ouro AGDT:
+    1. Apenas verbos FINITOS (modo Indicativo, Subjuntivo, Optativo, Imperativo) podem ter relation PRED/PRED_CO.
+    2. Se um particípio (verbform=part/particípio) ou infinitivo tiver PRED/PRED_CO:
+       - Transforma o PRED em OBJ (se for acusativo substantivado) ou ATR.
+       - Reassocia o head ao verbo finito principal (ou coordenador).
+    """
+    def get_v(w, k):
+        return w.get(k) if isinstance(w, dict) else getattr(w, k, None)
+
+    def set_v(w, k, val):
+        if isinstance(w, dict):
+            w[k] = val
+        else:
+            setattr(w, k, val)
+
+    # Identifica o único verbo finito matriz (PRED real da sentença)
+    verbo_principal = next((
+        w for w in words 
+        if get_v(w, "relation") == "PRED" 
+        and not ("part" in str(get_v(w, "postag")).lower() or "inf" in str(get_v(w, "postag")).lower())
+    ), None)
+    
+    id_pred_real = get_v(verbo_principal, "id") if verbo_principal else 0
+
+    for w in words:
+        rel = get_v(w, "relation") or get_v(w, "new_rel")
+        postag = str(get_v(w, "postag")).lower()
+        form = str(get_v(w, "form") or get_v(w, "text")).lower()
+
+        # Verifica se é particípio ou infinitivo pelas terminações/postag
+        eh_participio_ou_inf = (
+            "part" in postag or "inf" in postag 
+            or form.endswith(("ντας", "ντες", "μενος", "μενους", "σαι", "ναι", "ειν"))
+        )
+
+        # SE FOR PARTICÍPIO OU INFINITIVO E TIVER PRED / PRED_CO:
+        if eh_participio_ou_inf and rel in {"PRED", "PRED_CO"}:
+            if form.endswith("σαι") or "inf" in postag:
+                # Infinitivo vira OBJ do particípio/verbo anterior
+                set_v(w, "relation", "OBJ")
+                set_v(w, "new_rel", "OBJ")
+            else:
+                # Particípio em acusativo vira OBJ do verbo principal
+                nova_rel = "OBJ_CO" if "CO" in rel else "OBJ"
+                set_v(w, "relation", nova_rel)
+                set_v(w, "new_rel", nova_rel)
+                
+                if id_pred_real > 0:
+                    set_v(w, "head", id_pred_real)
+                    set_v(w, "new_head", id_pred_real)
+            
+            set_v(w, "lock", True)
+
 def converter_sentenca(sent):
     words = construir_words(sent)
     
@@ -1977,6 +2032,8 @@ def converter_sentenca(sent):
     resolver_escopo_acusativos_infinitivos(words)
     reestruturar_oracao_subordinada_inicial(words)
     resolver_predicativos_de_estado_e_copula(words)
+    # NOVÍSSIMA REGRA DE OURO DA AGDT:
+    proibir_pred_em_formas_nao_finitas(words)  # <-- INSERIR AQUI!
     
     # 5. Sintagmas Preposicionais e Focalizadores
     aplicar_auxp_generico(words)
