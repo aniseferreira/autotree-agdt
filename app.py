@@ -1441,6 +1441,7 @@ def resolver_escopo_acusativos_infinitivos(words):
                 w["head"] = inf_proximo["id"]
                 w["new_rel"] = "OBJ"
                 w["relation"] = "OBJ"
+                w["lock"] = True  # <-- ESTA LINHA IMPEDE QUE A LLM SOBERPONHA O ESCOPO DO ACUSATIVO!
 
 def aplicar_refinamento_llm_com_trava_rigida(words_locais, corrections_llm):
     """
