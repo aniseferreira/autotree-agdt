@@ -1555,33 +1555,41 @@ def resolver_escopo_acusativos_infinitivos(words):
                 w["lock"] = True  # <-- ESTA LINHA IMPEDE QUE A LLM SOBERPONHA O ESCOPO DO ACUSATIVO!
 
 def resolver_artigo_participio_e_infinitivo(words):
+    """
+    Regra Genérica AGDT:
+    1. Força o artigo determinante a ser ATR da palavra seguinte.
+    2. Garante que o particípio/substantivo articulado seja SBJ do infinitivo.
+    """
     artigos_formas = {
         "ὁ", "ἡ", "τό", "τὸ", "τον", "τὸν", "τη̄ν", "τὴν", 
         "τοῦ", "τῆς", "τῷ", "τῇ", "οἱ", "αἱ", "τά", "τὰ", "τούς", "τοὺς"
     }
 
-    infinitivos = [
-        w for w in words 
-        if "VerbForm=Inf" in w.get("feats", "") 
-        or any(w.get("form", "").endswith(suf) for suf in ["ειν", "εναι", "αι", "σθαι", "εῑν"])
-    ]
+    # Procura infinitivos por morfologia OU por terminação grega típica
+    infinitivos = []
+    for w in words:
+        texto = (w.get("form") or w.get("text") or w.get("word") or "").lower()
+        feats = w.get("feats") or ""
+        if "VerbForm=Inf" in feats or any(texto.endswith(suf) for suf in ["ειν", "εναι", "αι", "σθαι", "εῑν"]):
+            infinitivos.append(w)
 
     for i, w in enumerate(words):
-        form_norm = normalizar(w.get("form", "").lower())
+        texto_w = (w.get("form") or w.get("text") or w.get("word") or "").lower()
+        form_norm = normalizar(texto_w)
 
         if form_norm in {normalizar(a) for a in artigos_formas}:
             idx_next = i + 1
             if idx_next < len(words):
                 w_next = words[idx_next]
 
-                # 1. Artigo vira ATR do próximo token (Aplica em TODAS as chaves de head/relation)
+                # 1. Artigo vira ATR da palavra seguinte em TODAS as chaves
                 w["head"] = w_next["id"]
                 w["new_head"] = w_next["id"]
                 w["relation"] = "ATR"
                 w["new_rel"] = "ATR"
                 w["lock"] = True
 
-                # 2. Próximo token (particípio) vira SBJ do infinitivo
+                # 2. Palavra seguinte vira SBJ do infinitivo em TODAS as chaves
                 if infinitivos:
                     inf_regente = infinitivos[0]
                     if w_next["id"] != inf_regente["id"]:
@@ -1805,20 +1813,17 @@ def converter_sentenca(sent):
     words_locais_copia = [dict(w) for w in words]
     modelo_usado = None
 
-    # 📍 COLOQUE O BLOCO DE DEPURAÇÃO EXATAMENTE AQUI:
-    print("=== DEPURACAO PALAVRAS APÓS REGRAS LOCAIS ===")
+    print("=== DEPURACAO PALAVRAS 5, 6 E 7 APÓS REGRAS LOCAIS ===")
     for w in words:
-        w_id = w.get("id") or w.get("word_id")
+        w_id = w.get("id") if isinstance(w, dict) else getattr(w, "id", None)
         if str(w_id) in {"5", "6", "7"}:
-            print(
-                f"ID: {w_id} | "
-                f"Form: {w.get('form', w.get('text', ''))} | "
-                f"Head: {w.get('head')} | "
-                f"NewHead: {w.get('new_head')} | "
-                f"Rel: {w.get('relation')} | "
-                f"NewRel: {w.get('new_rel')} | "
-                f"Lock: {w.get('lock')}"
-            )
+            form_text = w.get("form") or w.get("text") or w.get("word") or ""
+            head_val = w.get("head")
+            new_head_val = w.get("new_head")
+            rel_val = w.get("relation")
+            new_rel_val = w.get("new_rel")
+            lock_val = w.get("lock")
+            print(f"ID: {w_id} | Form: {form_text} | Head: {head_val} | NewHead: {new_head_val} | Rel: {rel_val} | NewRel: {new_rel_val} | Lock: {lock_val}")
 
 # 2. Chama a API do OpenRouter
     api_key = st.secrets.get("OPENROUTER_API_KEY", "")
