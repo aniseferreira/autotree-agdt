@@ -1805,6 +1805,21 @@ def converter_sentenca(sent):
     words_locais_copia = [dict(w) for w in words]
     modelo_usado = None
 
+    # 📍 COLOQUE O BLOCO DE DEPURAÇÃO EXATAMENTE AQUI:
+    print("=== DEPURACAO PALAVRAS APÓS REGRAS LOCAIS ===")
+    for w in words:
+        w_id = w.get("id") or w.get("word_id")
+        if str(w_id) in {"5", "6", "7"}:
+            print(
+                f"ID: {w_id} | "
+                f"Form: {w.get('form', w.get('text', ''))} | "
+                f"Head: {w.get('head')} | "
+                f"NewHead: {w.get('new_head')} | "
+                f"Rel: {w.get('relation')} | "
+                f"NewRel: {w.get('new_rel')} | "
+                f"Lock: {w.get('lock')}"
+            )
+
 # 2. Chama a API do OpenRouter
     api_key = st.secrets.get("OPENROUTER_API_KEY", "")
     if api_key:
