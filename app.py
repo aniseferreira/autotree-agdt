@@ -1466,11 +1466,9 @@ def preservar_sujeitos_principais_locais(words_locais, words_pos_llm):
     return words_pos_llm
 
 def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
-    """
-    Tenta refinar a árvore sintática via OpenRouter testando modelos em cascata.
-    """
+    """Refina a árvore via OpenRouter e retorna (words, modelo_utilizado)."""
     if not api_key:
-        return words
+        return words, None
 
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
@@ -1484,6 +1482,10 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
         "openai/gpt-4o-mini"
     ]
 
+    # Reconstrução segura da string da sentença caso text_sent não venha como string
+    if not isinstance(text_sent, str):
+        text_sent = " ".join([str(w.get("text", "")) for w in words])
+
     tokens_payload = [
         {
             "id": w["id"], 
@@ -1495,7 +1497,6 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
         for w in words
     ]
 
-    # Concatenação segura para evitar erros de sintaxe ou NameError no escopo global
     str_payload = json.dumps(tokens_payload, ensure_ascii=False)
     
     prompt = (
@@ -1503,11 +1504,11 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
         "Analise a sentença: " + str(text_sent) + "\n\n"
         "Abaixo está a lista de tokens com id, form, lemma, head e relation atuais:\n"
         + str_payload + "\n\n"
-        "Instruções de Ajuste:\n"
-        "1. Se houver coordenação de orações principais com COORD (head=0), NUNCA use PRED. Use PRED_CO para todos os verbos principais coordenados apontando para o nó COORD.\n"
-        "2. Agente da passiva (ὑπό + Genitivo) deve ter a preposição como AuxP e o termo regido como OBJ.\n"
-        "3. Verifique as valências e argumentos dos verbos no acusativo/dativo/genitivo para garantir que estejam ligados ao verbo semanticamente correto.\n"
-        "4. ATENÇÃO: Quando houver múltiplos infinitivos em sequência (ex: Βάλλειν ... εἰπεῖν) e múltiplos acusativos 'τινὰ', CADA infinitivo deve receber o seu respectivo 'τινὰ' como OBJ (não vincule ambos ao mesmo verbo!).\n\n"
+        "REGRAS DE CONSERVAÇÃO ESTRUTURAL:\n"
+        "1. RESPEITE A HIERARQUIA: Nunca altere o sujeito (SBJ) do verbo principal para fazê-lo depender de um infinitivo subordinado.\n"
+        "2. ETIQUETAS PERMITIDAS: SBJ, OBJ, OCOMP, PRED, PRED_CO, COORD, ADV, AuxP, AuxC, AuxX, ATR, PNOM.\n"
+        "3. PROIBIDO usar a etiqueta inexistente 'PCOMP'. Para predicativo do objeto, use estritamente 'OCOMP'.\n"
+        "4. Em orações com múltiplos infinitivos, cada infinitivo deve governar apenas os seus próprios argumentos diretos conforme a ordem linear e o escopo da oração.\n\n"
         "Retorne APENAS um array JSON válido no formato:\n"
         '[ {"id": 1, "head": 7, "rel": "SBJ"}, ... ]'
     )
@@ -1534,11 +1535,12 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
                         w["head"] = corr_map[w["id"]]["head"]
                         w["new_rel"] = corr_map[w["id"]]["rel"]
                         w["relation"] = corr_map[w["id"]]["rel"]
-                return words
+                
+                return words, modelo
         except Exception:
             continue
 
-    return words
+    return words, None
 
 
 def converter_sentenca(sent):
@@ -1601,6 +1603,7 @@ def converter_sentenca(sent):
     # 2. Chama a API do OpenRouter em Cascata
     api_key = st.secrets.get("OPENROUTER_API_KEY", "")
     if api_key:
+        texto_frase = getattr(sent, 'text', '')
         words, modelo_usado = refinar_arvore_com_openrouter_cascata(words, sent.text, api_key)
         
         # 3. A salvaguarda SÓ roda se uma LLM respondeu com sucesso!
