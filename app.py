@@ -929,9 +929,10 @@ def resolver_infinitivo_articulado(words):
 
 def resolver_kai_enfatico(words):
     """
-    Se 'καὶ' antecede um acusativo (ex: ἀποδημίαν) e atua como AuxZ (enfático),
-    garante que o 'καὶ' dependa do acusativo e NENHUMA outra palavra (como o infinitivo)
-    fique dependendo do 'καὶ'.
+    Regra Genérica AGDT:
+    Se 'καὶ' atua como modificador enfático (AuxZ) de um substantivo/objeto subsequente,
+    desfaz qualquer falsa coordenação anterior: o token que dependia do 'καὶ' 
+    passa a depender do verbo regente local.
     """
     for i, w in enumerate(words):
         if w.get("lemma") in {"καί", "καὶ"}:
@@ -939,39 +940,51 @@ def resolver_kai_enfatico(words):
 
             if idx_next < len(words):
                 w_next = words[idx_next]
-                # Se a palavra seguinte for o objeto em acusativo (ex: ἀποδημίαν)
-                if w_next.get("upos") in {"NOUN", "PROPN"} or "Case=Acc" in w_next.get("feats", "") or normalizar(w_next.get("lemma", "")) == "ἀποδημία":
-                    
-                    # 1. 'καὶ' vira AuxZ de 'ἀποδημίαν' e ganha LOCK
+                
+                # Se o token seguinte for um substantivo em acusativo (ex: ἀποδημίαν)
+                is_acusativo = (
+                    w_next.get("upos") in {"NOUN", "PROPN"} 
+                    or "Case=Acc" in w_next.get("feats", "")
+                )
+
+                if is_acusativo:
+                    # Identifica o verbo regente da oração
+                    verbos = [
+                        v for v in words 
+                        if v.get("upos") == "VERB" and "VerbForm=Inf" not in v.get("feats", "")
+                    ]
+                    if not verbos:
+                        continue
+                    v_regente = verbos[-1]
+
+                    # 1. 'καὶ' vira AuxZ do objeto seguinte e ganha LOCK
                     w["head"] = w_next["id"]
                     w["new_head"] = w_next["id"]
                     w["relation"] = "AuxZ"
                     w["new_rel"] = "AuxZ"
                     w["lock"] = True
 
-                    # 2. 'ἀποδημίαν' vira OBJ do verbo principal e ganha LOCK
-                    verbos = [v for v in words if v.get("relation") in {"PRED", "PRED_CO"} or v.get("upos") == "VERB"]
-                    if verbos:
-                        v_main = verbos[-1] # Pega o verbo principal (ex: προηγόρευσε)
-                        w_next["head"] = v_main["id"]
-                        w_next["new_head"] = v_main["id"]
-                        w_next["relation"] = "OBJ"
-                        w_next["new_rel"] = "OBJ"
-                        w_next["lock"] = True
+                    # 2. O substantivo seguinte vira OBJ do verbo e ganha LOCK
+                    w_next["head"] = v_regente["id"]
+                    w_next["new_head"] = v_regente["id"]
+                    w_next["relation"] = "OBJ"
+                    w_next["new_rel"] = "OBJ"
+                    w_next["lock"] = True
 
-                    # 3. LIMPEZA: Se algum nó anterior (como o infinitivo) estava apontando para o 'καὶ', desvincula!
+                    # 3. GENÉRICO: Qualquer token anterior que estivesse dependendo do 'καὶ' (falsa coordenação)
+                    # é desvinculado e ligado ao verbo regente como Sujeito ou Objeto
                     for w_prev in words:
                         if w_prev.get("head") == w["id"] or w_prev.get("new_head") == w["id"]:
                             if w_prev["id"] != w_next["id"]:
-                                # Devolve o infinitivo para o verbo principal como SBJ
-                                if verbos:
-                                    w_prev["head"] = verbos[0]["id"]
-                                    w_prev["new_head"] = verbos[0]["id"]
-                                    w_prev["relation"] = "SBJ"
-                                    w_prev["new_rel"] = "SBJ"
-                                    w_prev["lock"] = True
-
-
+                                # Se tiver artigo neutro 'τὸ' antes dele ou for infinitivo, é SBJ
+                                rel = "SBJ" if "VerbForm=Inf" in w_prev.get("feats", "") or w_prev.get("form", "").endswith(("ειν", "σθαι")) else "OBJ"
+                                
+                                w_prev["head"] = v_regente["id"]
+                                w_prev["new_head"] = v_regente["id"]
+                                w_prev["relation"] = rel
+                                w_prev["new_rel"] = rel
+                                w_prev["lock"] = True
+                                
 def aplicar_coordenacao_sujeito_neutro(words):
     for i, w in enumerate(words):
         texto = w.get("text", "").lower()
