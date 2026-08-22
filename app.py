@@ -1807,12 +1807,6 @@ def converter_sentenca(sent):
     # REBALANCEAMENTO DE ESCOPO (Impede adjuntos de "vazarem" para a oração anterior)
     rebalancear_dependentes_por_fronteira_coord(words)    
 
-     # PRINT DE DEPURAÇÃO NO CONSOLE / TERMINAL DO STREAMLIT:
-    print("=== DEPURACAO PALAVRAS 5 E 6 APÓS REGRAS LOCAIS ===")
-    for w in words:
-        if w["id"] in {5, 6, 7}:
-            print(f"ID: {w['id']} | Form: {w['form']} | Head: {w.get('head')} | Rel: {w.get('relation')} | Lock: {w.get('lock')}")
-
     
     # 1. Guarda a cópia da árvore gerada estritamente pelas SUAS REGRAS LOCAIS
     words_locais_copia = [dict(w) for w in words]
