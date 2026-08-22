@@ -1442,26 +1442,24 @@ def resolver_escopo_acusativos_infinitivos(words):
                 w["new_rel"] = "OBJ"
                 w["relation"] = "OBJ"
 
-def preservar_sujeitos_principais_locais(words_originais, words_pos_llm):
+def preservar_sujeitos_principais_locais(words_locais, words_pos_llm):
     """
     Garantia Sintática Genérica:
-    Se a regra local identificou um infinitivo/termo como sujeito (SBJ) do verbo principal
-    e a LLM o rebaixou para dependente de um verbo subordinado/infinitivo, restaura o head original.
+    Se as suas REGRAS LOCAIS (Python) definiram um nó como SBJ do verbo principal,
+    e a LLM o rebaixou para dependente de um infinitivo subordinado, restaura a versão local.
     """
-    # Mapeia os heads e relações gerados pelas suas regras locais originais
-    mapa_original = {w["id"]: (w.get("head"), w.get("relation")) for w in words_originais}
+    mapa_local = {w["id"]: (w.get("head"), w.get("relation")) for w in words_locais}
 
     for w in words_pos_llm:
-        head_orig, rel_orig = mapa_original.get(w["id"], (None, None))
+        head_local, rel_local = mapa_local.get(w["id"], (None, None))
         
-        # Se a regra local havia definido que este nó era SBJ do verbo principal (ou PRED_CO)
-        if rel_orig == "SBJ":
-            # Se a LLM tentou fazer ele apontar para outro infinitivo/verbo subordinado
+        # Se a sua regra local definiu que este nó era o Sujeito (SBJ)
+        if rel_local == "SBJ":
             head_llm = w.get("head")
-            # Se o novo head da LLM não for o verbo principal, restaura o apontamento sintático original
-            if head_llm != head_orig:
-                w["head"] = head_orig
-                w["new_head"] = head_orig
+            # Se a LLM alterou o apontamento que suas regras locais definiram
+            if head_llm != head_local:
+                w["head"] = head_local
+                w["new_head"] = head_local
                 w["relation"] = "SBJ"
                 w["new_rel"] = "SBJ"
 
@@ -1594,24 +1592,23 @@ def converter_sentenca(sent):
     
     # 7. VALIDAÇÃO FINAL DA REGRA DE OURO
     garantir_simetria_coord_predicados(words)
+   
 
-    # 1. Antes da API: Guarda a cópia local e inicializa a variável modelo_usado
+    # 1. Guarda a cópia da árvore gerada estritamente pelas SUAS REGRAS LOCAIS
     words_locais_copia = [dict(w) for w in words]
     modelo_usado = None
 
-    # ------------------------------------------------------------------
-    # CHAMADA DA API OPENROUTER (Lê dos Secrets do Streamlit automaticamente)
-    # ------------------------------------------------------------------
-    # Tenta refinamento via API OpenRouter em cascata (se houver chave nos Secrets)
+    # 2. Chama a API do OpenRouter em Cascata
     api_key = st.secrets.get("OPENROUTER_API_KEY", "")
     if api_key:
-        words = refinar_arvore_com_openrouter_cascata(words, sent.text, api_key)
-
-    # 3. Depois da API: Salvaguarda dos sujeitos
-        words = preservar_sujeitos_principais_locais(words_locais_copia, words)
+        words, modelo_usado = refinar_arvore_com_openrouter_cascata(words, sent.text, api_key)
+        
+        # 3. A salvaguarda SÓ roda se uma LLM respondeu com sucesso!
+        if modelo_usado:
+            words = preservar_sujeitos_principais_locais(words_locais_copia, words)
 
     # REBALANCEAMENTO DE ESCOPO (Impede adjuntos de "vazarem" para a oração anterior)
-    rebalancear_dependentes_por_fronteira_coord(words)
+    rebalancear_dependentes_por_fronteira_coord(words)    
 
     # 8. Mapeamento final de heads e relações (Apenas se não estiver travado por regra)
     for w in words:
