@@ -1443,6 +1443,55 @@ def resolver_escopo_acusativos_infinitivos(words):
                 w["relation"] = "OBJ"
                 w["lock"] = True  # <-- ESTA LINHA IMPEDE QUE A LLM SOBERPONHA O ESCOPO DO ACUSATIVO!
 
+def reestruturar_coordenacao_atributos(words):
+    """
+    Regra Genérica AGDT:
+    Ajusta padrões de coordenação [Substantivo] + [Adj1] + [καὶ/Coord] + [Adj2].
+    Faz o 'καὶ' depender do Substantivo (COORD) e ambos os adjetivos dependerem do 'καὶ' (ATR_CO).
+    """
+    for i, w in enumerate(words):
+        # Procura por uma conjunção coordenativa (ex: καὶ, ἢ, δὲ)
+        if w.get("relation") in {"COORD", "cc"} or w.get("upos") == "CCONJ" or w.get("lemma") in {"καί", "καὶ", "ἤ", "δέ", "δὲ"}:
+            
+            # Identifica o token anterior e o posterior à conjunção
+            idx_conj = i
+            idx_adj1 = idx_conj - 1
+            idx_adj2 = idx_conj + 1
+
+            if idx_adj1 >= 0 and idx_adj2 < len(words):
+                w_adj1 = words[idx_adj1]
+                w_adj2 = words[idx_adj2]
+
+                # Verifica se ambos são adjetivos/atributos (ou compartilham a mesma classe/caso)
+                is_adj1 = w_adj1.get("upos") in {"ADJ", "DET"} or "ATR" in w_adj1.get("relation", "")
+                is_adj2 = w_adj2.get("upos") in {"ADJ", "DET"} or "ATR" in w_adj2.get("relation", "")
+
+                if is_adj1 and is_adj2:
+                    # O substantivo regente é o head do adj1 original
+                    head_substantivo = w_adj1.get("head")
+
+                    if head_substantivo and head_substantivo != w["id"]:
+                        # 1. A conjunção passa a depender do substantivo (COORD)
+                        w["head"] = head_substantivo
+                        w["new_head"] = head_substantivo
+                        w["relation"] = "COORD"
+                        w["new_rel"] = "COORD"
+                        w["lock"] = True
+
+                        # 2. O 1º adjetivo passa a depender da conjunção (ATR_CO)
+                        w_adj1["head"] = w["id"]
+                        w_adj1["new_head"] = w["id"]
+                        w_adj1["relation"] = "ATR_CO"
+                        w_adj1["new_rel"] = "ATR_CO"
+                        w_adj1["lock"] = True
+
+                        # 3. O 2º adjetivo passa a depender da conjunção (ATR_CO)
+                        w_adj2["head"] = w["id"]
+                        w_adj2["new_head"] = w["id"]
+                        w_adj2["relation"] = "ATR_CO"
+                        w_adj2["new_rel"] = "ATR_CO"
+                        w_adj2["lock"] = True
+
 def aplicar_refinamento_llm_com_trava_rigida(words_locais, corrections_llm):
     """
     Garantia Absoluta:
