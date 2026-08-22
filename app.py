@@ -1442,6 +1442,31 @@ def resolver_escopo_acusativos_infinitivos(words):
                 w["new_rel"] = "OBJ"
                 w["relation"] = "OBJ"
 
+def preservar_sujeitos_principais_locais(words_originais, words_pos_llm):
+    """
+    Garantia Sintática Genérica:
+    Se a regra local identificou um infinitivo/termo como sujeito (SBJ) do verbo principal
+    e a LLM o rebaixou para dependente de um verbo subordinado/infinitivo, restaura o head original.
+    """
+    # Mapeia os heads e relações gerados pelas suas regras locais originais
+    mapa_original = {w["id"]: (w.get("head"), w.get("relation")) for w in words_originais}
+
+    for w in words_pos_llm:
+        head_orig, rel_orig = mapa_original.get(w["id"], (None, None))
+        
+        # Se a regra local havia definido que este nó era SBJ do verbo principal (ou PRED_CO)
+        if rel_orig == "SBJ":
+            # Se a LLM tentou fazer ele apontar para outro infinitivo/verbo subordinado
+            head_llm = w.get("head")
+            # Se o novo head da LLM não for o verbo principal, restaura o apontamento sintático original
+            if head_llm != head_orig:
+                w["head"] = head_orig
+                w["new_head"] = head_orig
+                w["relation"] = "SBJ"
+                w["new_rel"] = "SBJ"
+
+    return words_pos_llm
+
 def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     """
     Tenta refinar a árvore sintática via OpenRouter testando modelos em cascata.
@@ -1570,6 +1595,9 @@ def converter_sentenca(sent):
     # 7. VALIDAÇÃO FINAL DA REGRA DE OURO
     garantir_simetria_coord_predicados(words)
 
+    # Guarda uma cópia da árvore gerada estritamente pelo seu código Python
+    words_locais_copia = [dict(w) for w in words]
+
     # ------------------------------------------------------------------
     # CHAMADA DA API OPENROUTER (Lê dos Secrets do Streamlit automaticamente)
     # ------------------------------------------------------------------
@@ -1577,6 +1605,9 @@ def converter_sentenca(sent):
     api_key = st.secrets.get("OPENROUTER_API_KEY", "")
     if api_key:
         words = refinar_arvore_com_openrouter_cascata(words, sent.text, api_key)
+
+    # Restaura o comportamento estrutural correto onde a LLM regrediu
+        words = preservar_sujeitos_principais_locais(words_locais_copia, words)
 
     # REBALANCEAMENTO DE ESCOPO (Impede adjuntos de "vazarem" para a oração anterior)
     rebalancear_dependentes_por_fronteira_coord(words)
@@ -1598,7 +1629,8 @@ def converter_sentenca(sent):
         if str(w.get("new_head")) == str(w.get("id")):
             w["new_head"] = 0
 
-    return {"text": sent.text, "words": words}
+    # RETORNO ATUALIZADO: Inclui o modelo_usado no dicionário final
+    return {"text": sent.text, "words": words, "modelo_usado": modelo_usado}
 
 def gerar_agdt_xml(sentences):
     root = ET.Element("treebank")
@@ -1690,21 +1722,24 @@ else:
         entrada_texto = arquivo_carregado.read().decode("utf-8")
         st.text_area("Pré-visualização do arquivo carregado:", value=entrada_texto, height=140, disabled=True)
 
-if st.button("Processar Texto", type="primary"):
-    if not entrada_texto.strip():
-        st.warning("Por favor, insira ou carregue um texto para conversão.")
-    else:
-        with st.spinner("Processando anotação sintática com Stanza..."):
-            texto_formatado = pre_processar_sentencas(entrada_texto)
-            
-            doc = nlp(texto_formatado)
-            sentences_convertidas = [converter_sentenca(sent) for sent in doc.sentences]
-            
-            xml_str = gerar_agdt_xml(sentences_convertidas)
-            conllu_str = gerar_conllu(sentences_convertidas)
+if st.button("Processar Sentença", type="primary"):
+    with st.spinner("Analisando gramática e executando refinamento..."):
+        
+        # 1. Executa o seu pipeline
+        resultado = converter_sentenca(doc.sentences[0])
+        
+        st.success("Análise concluída!")
+        
+        # 2. ACRESCENTE ESTE BLOCO AQUI (Abaixo do st.success e acima dos gráficos/XML):
+        modelo = resultado.get("modelo_usado")
+        if modelo:
+            st.caption(f"🤖 **Refinamento semântico executado por:** `{modelo}`")
+        else:
+            st.caption("⚡ **Processado exclusivamente pelas regras locais (sem LLM).**")
 
-        st.success(f"Processamento concluído com sucesso! ({len(doc.sentences)} sentença(s) identificada(s))")
-        st.subheader("2. Resultados e Exportação")
+        st.subheader("Resultado da Anotação Sintática")
+        
+        # 3. Seu código existente para exibir a árvore/XML continua daqui para baixo...
 
         tab_xml, tab_conllu = st.tabs(["📄 XML Arethusa (AGDT)", "📝 CoNLL-U (UD)"])
 
