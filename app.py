@@ -881,28 +881,31 @@ def aplicar_infinitivo_substantivado_artigo(words):
 def resolver_infinitivo_articulado(words):
     """
     Regra Genérica AGDT: 
-    O artigo neutro ('τὸ', 'toũ', 'tῷ', etc.) torna o infinitivo o núcleo 
-    do sintagma nominal. O infinitivo passa a ser SBJ ou OBJ do verbo finito 
-    regente daquela oração específica (não necessariamente o PRED principal).
+    O artigo neutro ('τὸ') torna o infinitivo o núcleo do sintagma nominal (SBJ).
     """
-    # Lista todos os verbos finitos da frase
     verbos_finitos = [
         w for w in words 
-        if w.get("upos") == "VERB" and "VerbForm=Inf" not in w.get("feats", "")
+        if w.get("upos") == "VERB" and not w.get("form", "").endswith(("ειν", "σθαι", "έναι", "αί"))
     ]
     
     if not verbos_finitos:
         return
 
     for i, w in enumerate(words):
-        # Encontra o artigo neutro 'τὸ' (ou flexões de artigo neutro singular)
-        if w.get("lemma") == "ὁ" and w.get("form") in {"τὸ", "τό", "τοῦ", "τῷ"}:
+        # Encontra o artigo neutro 'τὸ'
+        if w.get("lemma") == "ὁ" and w.get("form") in {"τὸ", "τό"}:
             
-            # Procura o infinitivo no escopo imediato (1 a 3 palavras à frente)
+            # Procura o infinitivo logo a seguir (1 a 3 tokens de distância)
             for j in range(i + 1, min(i + 4, len(words))):
                 w_target = words[j]
-                if "VerbForm=Inf" in w_target.get("feats", "") or w_target.get("upos") == "VERB":
-                    
+                
+                # Checa por feats, upos ou terminação verbal típica de infinitivo
+                is_inf = (
+                    "VerbForm=Inf" in w_target.get("feats", "") 
+                    or w_target.get("form", "").endswith(("ειν", "σθαι", "έναι", "αί"))
+                )
+
+                if is_inf:
                     # 1. O artigo é ATR do infinitivo
                     w["head"] = w_target["id"]
                     w["new_head"] = w_target["id"]
@@ -910,20 +913,17 @@ def resolver_infinitivo_articulado(words):
                     w["new_rel"] = "ATR"
                     w["lock"] = True
 
-                    # 2. Encontra o verbo finito regente MAIS PRÓXIMO (da mesma oração)
+                    # 2. Encontra o verbo finito regente mais próximo
                     verbo_regente = min(
                         verbos_finitos, 
                         key=lambda v: abs(v["id"] - w_target["id"])
                     )
 
-                    # 3. O infinitivo articulado vira dependente desse verbo regente específico
-                    # Se o artigo for Nominativo ('τὸ'), tende a SBJ; se oblíquo, tende a OBJ/ADV
-                    relacao_inf = "SBJ" if w.get("form") in {"τὸ", "τό"} else "OBJ"
-                    
+                    # 3. O infinitivo articulado passa a ser SBJ do verbo e ganha LOCK
                     w_target["head"] = verbo_regente["id"]
                     w_target["new_head"] = verbo_regente["id"]
-                    w_target["relation"] = relacao_inf
-                    w_target["new_rel"] = relacao_inf
+                    w_target["relation"] = "SBJ"
+                    w_target["new_rel"] = "SBJ"
                     w_target["lock"] = True
                     break
 
