@@ -1555,40 +1555,33 @@ def resolver_escopo_acusativos_infinitivos(words):
                 w["lock"] = True  # <-- ESTA LINHA IMPEDE QUE A LLM SOBERPONHA O ESCOPO DO ACUSATIVO!
 
 def resolver_artigo_participio_e_infinitivo(words):
-    """
-    Regra Genérica AGDT:
-    1. Força qualquer artigo determinante a ser ATR da palavra seguinte.
-    2. Se há infinitivo, o termo articulado vira SBJ do infinitivo.
-    """
     artigos_formas = {
         "ὁ", "ἡ", "τό", "τὸ", "τον", "τὸν", "τη̄ν", "τὴν", 
         "τοῦ", "τῆς", "τῷ", "τῇ", "οἱ", "αἱ", "τά", "τὰ", "τούς", "τοὺς"
     }
-    
-    # Localiza o infinitivo na sentença
+
     infinitivos = [
         w for w in words 
         if "VerbForm=Inf" in w.get("feats", "") 
-        or normalizar(w.get("form", "")).endswith(("ειν", "σθαι", "εναι", "αι"))
+        or any(w.get("form", "").endswith(suf) for suf in ["ειν", "εναι", "αι", "σθαι", "εῑν"])
     ]
 
     for i, w in enumerate(words):
         form_norm = normalizar(w.get("form", "").lower())
-        
-        # Se a palavra for um artigo reconhecido pela forma
+
         if form_norm in {normalizar(a) for a in artigos_formas}:
             idx_next = i + 1
             if idx_next < len(words):
                 w_next = words[idx_next]
 
-                # 1. Artigo vira ATR do próximo token e ganha LOCK
+                # 1. Artigo vira ATR do próximo token (Aplica em TODAS as chaves de head/relation)
                 w["head"] = w_next["id"]
                 w["new_head"] = w_next["id"]
                 w["relation"] = "ATR"
                 w["new_rel"] = "ATR"
                 w["lock"] = True
 
-                # 2. O próximo token vira SBJ do infinitivo e ganha LOCK
+                # 2. Próximo token (particípio) vira SBJ do infinitivo
                 if infinitivos:
                     inf_regente = infinitivos[0]
                     if w_next["id"] != inf_regente["id"]:
@@ -1597,7 +1590,7 @@ def resolver_artigo_participio_e_infinitivo(words):
                         w_next["relation"] = "SBJ"
                         w_next["new_rel"] = "SBJ"
                         w_next["lock"] = True
-
+                        
 def reestruturar_coordenacao_atributos(words):
     """
     Regra Genérica AGDT:
