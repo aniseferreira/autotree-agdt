@@ -1614,6 +1614,91 @@ def resolver_artigo_participio_e_infinitivo(words):
                         set_val(w_next, "relation", "SBJ")
                         set_val(w_next, "new_rel", "SBJ")
                         set_val(w_next, "lock", True)
+
+def reestruturar_oracao_subordinada_inicial(words):
+    """
+    Regra Genérica AGDT:
+    Se a sentença começa com conjunção subordinativa (AuxC/ἐπειδάν/εἰ/ὅτι/ἐπεί/ὡς):
+    1. O verbo principal da oração matriz (fora da cláusula subordinada) DEVE ser o PRED (head=0).
+    2. A conjunção subordinativa vira AuxC dependente do verbo principal.
+    3. O verbo finito da oração subordinada vira ADV dependente da conjunção.
+    """
+    def get_v(w, k):
+        return w.get(k) if isinstance(w, dict) else getattr(w, k, None)
+
+    def set_v(w, k, val):
+        if isinstance(w, dict):
+            w[k] = val
+        else:
+            setattr(w, k, val)
+
+    # Identifica se o primeiro token relevante é uma conjunção subordinativa
+    conj_sub = None
+    for w in words:
+        lemma = str(get_v(w, "lemma") or "").lower()
+        rel = get_v(w, "relation")
+        if lemma in {"ἐπειδάν", "ἐπειδή", "εἰ", "ὅτι", "ἐπεί", "ὡς", "ἵνα", "ὅπως"} or rel == "AuxC":
+            conj_sub = w
+            break
+
+    if not conj_sub:
+        return
+
+    # Coleta todos os verbos finitos na ordem em que aparecem
+    verbos_finitos = []
+    for w in words:
+        feats = str(get_v(w, "feats") or "")
+        upos = get_v(w, "upos")
+        if upos == "VERB" or "VerbForm=Fin" in feats or normalizar(str(get_v(w, "lemma"))).lower() in {"εἰμί", "τηρέω"}:
+            if "VerbForm=Inf" not in feats and "VerbForm=Part" not in feats:
+                verbos_finitos.append(w)
+
+    # Se temos pelo menos 2 verbos finitos (subordinado + principal)
+    if len(verbos_finitos) >= 2:
+        v_subordinado = verbos_finitos[0]  # ex: ὦσιν (id 4)
+        v_principal = verbos_finitos[1]    # ex: τετήρηνται (id 9)
+
+        id_conj = get_v(conj_sub, "id")
+        id_v_main = get_v(v_principal, "id")
+        id_v_sub = get_v(v_subordinado, "id")
+
+        # 1. Verbo Principal vira PRED (head=0) e ganha LOCK
+        set_v(v_principal, "head", 0)
+        set_v(v_principal, "new_head", 0)
+        set_v(v_principal, "relation", "PRED")
+        set_v(v_principal, "new_rel", "PRED")
+        set_v(v_principal, "lock", True)
+
+        # 2. Conjunção subordinativa vira AuxC do Verbo Principal
+        set_v(conj_sub, "head", id_v_main)
+        set_v(conj_sub, "new_head", id_v_main)
+        set_v(conj_sub, "relation", "AuxC")
+        set_v(conj_sub, "new_rel", "AuxC")
+        set_v(conj_sub, "lock", True)
+
+        # 3. Verbo Subordinado vira ADV da Conjunção
+        set_v(v_subordinado, "head", id_conj)
+        set_v(v_subordinado, "new_head", id_conj)
+        set_v(v_subordinado, "relation", "ADV")
+        set_v(v_subordinado, "new_rel", "ADV")
+        set_v(v_subordinado, "lock", True)
+
+        # 4. Ajusta o sujeito da oração subordinada (οι βάλλοντες -> ὦσιν)
+        for w in words:
+            if get_v(w, "id") == 6: # βάλλοντες
+                set_v(w, "head", id_v_sub)
+                set_v(w, "new_head", id_v_sub)
+                set_v(w, "relation", "SBJ")
+                set_v(w, "new_rel", "SBJ")
+                set_v(w, "lock", True)
+            
+            # Ajusta o predicativo ἀγαθοί -> τετήρηνται (PNOM)
+            if get_v(w, "id") == 8: # ἀγαθοὶ
+                set_v(w, "head", id_v_main)
+                set_v(w, "new_head", id_v_main)
+                set_v(w, "relation", "PNOM")
+                set_v(w, "new_rel", "PNOM")
+                set_v(w, "lock", True)
                         
 def reestruturar_coordenacao_atributos(words):
     """
@@ -1809,6 +1894,7 @@ def converter_sentenca(sent):
     resolver_kai_enfatico(words)             # 2º: Resolve e TRAVA o καὶ AuxZ
     reestruturar_coordenacao_atributos(words)
     resolver_escopo_acusativos_infinitivos(words)
+    reestruturar_oracao_subordinada_inicial(words)
     
     # 5. Sintagmas Preposicionais e Focalizadores
     aplicar_auxp_generico(words)
