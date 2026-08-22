@@ -1851,6 +1851,58 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
 
     return words, None
 
+def resolver_predicativo_verbo_ser(words):
+    """
+    Regra Genérica AGDT:
+    Se um verbo copulativo (εἰμί) possui dois nós marcados/associados como SBJ na oração:
+    1. O nó articulado (com artigo 'ὁ') permanece como SBJ.
+    2. O nó anartro (sem artigo) vira PNOM do verbo copulativo.
+    """
+    def get_v(w, k):
+        return w.get(k) if isinstance(w, dict) else getattr(w, k, None)
+
+    def set_v(w, k, val):
+        if isinstance(w, dict):
+            w[k] = val
+        else:
+            setattr(w, k, val)
+
+    # Localiza formas de εἰμί
+    verbos_copulativos = [
+        w for w in words 
+        if normalizar(str(get_v(w, "lemma"))).lower() in {"εἰμί", "eimi"} 
+        or str(get_v(w, "form")).lower() in {"ὦσιν", "ἐστί", "εἰσί", "ἦν"}
+    ]
+
+    for v in verbos_copulativos:
+        id_v = get_v(v, "id")
+        
+        # Coleta os candidatos a sujeito apontando para este verbo
+        sujeitos = [
+            w for w in words 
+            if (get_v(w, "head") == id_v or get_v(w, "new_head") == id_v) 
+            and get_v(w, "relation") in {"SBJ", "PNOM"}
+        ]
+
+        if len(sujeitos) >= 2:
+            # Em grego, o termo articulado (com artigo) é o SUJEITO, o anartro é o PREDICATIVO
+            for s in sujeitos:
+                id_s = get_v(s, "id")
+                # Verifica se o termo tem um artigo apontando para ele (ex: οἱ -> βάλλοντες)
+                tem_artigo = any(
+                    (get_v(art, "head") == id_s or get_v(art, "new_head") == id_s) 
+                    and normalizar(str(get_v(art, "lemma"))).lower() == "ὁ" 
+                    for art in words
+                )
+
+                if not tem_artigo:
+                    # O termo sem artigo (ex: πολλοὶ) vira PNOM do verbo εἰμί
+                    set_v(s, "head", id_v)
+                    set_v(s, "new_head", id_v)
+                    set_v(s, "relation", "PNOM")
+                    set_v(s, "new_rel", "PNOM")
+                    set_v(s, "lock", True)
+
 
 def converter_sentenca(sent):
     words = construir_words(sent)
@@ -1875,6 +1927,7 @@ def converter_sentenca(sent):
     aplicar_participios_substantivados(words)
     aplicar_ocomp_participio(words)
     aplicar_copula(words)
+    
 
     # REGRA: Agente da passiva (ὑπό + Gen)
     aplicar_regra_agente_da_passiva(words)
@@ -1895,6 +1948,7 @@ def converter_sentenca(sent):
     reestruturar_coordenacao_atributos(words)
     resolver_escopo_acusativos_infinitivos(words)
     reestruturar_oracao_subordinada_inicial(words)
+    resolver_predicativo_verbo_ser(words)
     
     # 5. Sintagmas Preposicionais e Focalizadores
     aplicar_auxp_generico(words)
