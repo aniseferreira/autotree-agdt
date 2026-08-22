@@ -1711,9 +1711,10 @@ def converter_sentenca(sent):
     sanitizar_coordenacao_predicados(words)  # Regra de ouro
     aplicar_oute_correlativo(words)
     aplicar_conectivos_correlativos(words)
+
+    resolver_infinitivo_articulado(words)   # 1º: Resolve e TRAVA o sujeito (τὸ βάλλεσθαι)
+    resolver_kai_enfatico(words)             # 2º: Resolve e TRAVA o καὶ AuxZ
     reestruturar_coordenacao_atributos(words)
-    resolver_infinitivo_articulado(words)  # <-- Aqui!
-    resolver_kai_enfatico(words)
     resolver_escopo_acusativos_infinitivos(words)
     
     # 5. Sintagmas Preposicionais e Focalizadores
