@@ -1854,9 +1854,9 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
 def resolver_predicativo_verbo_ser(words):
     """
     Regra Genérica AGDT:
-    Se um verbo copulativo (εἰμί) possui dois nós marcados/associados como SBJ na oração:
-    1. O nó articulado (com artigo 'ὁ') permanece como SBJ.
-    2. O nó anartro (sem artigo) vira PNOM do verbo copulativo.
+    1. Um SBJ JAMAIS pode ser dependente de outro SBJ.
+    2. Em orações copulativas (εἰμί), o termo sem artigo (anártrico) é PNOM 
+       e DEVE depender do VERBO, jamais do outro sujeito.
     """
     def get_v(w, k):
         return w.get(k) if isinstance(w, dict) else getattr(w, k, None)
@@ -1867,41 +1867,51 @@ def resolver_predicativo_verbo_ser(words):
         else:
             setattr(w, k, val)
 
-    # Localiza formas de εἰμί
-    verbos_copulativos = [
-        w for w in words 
-        if normalizar(str(get_v(w, "lemma"))).lower() in {"εἰμί", "eimi"} 
-        or str(get_v(w, "form")).lower() in {"ὦσιν", "ἐστί", "εἰσί", "ἦν"}
-    ]
+    def norm(txt):
+        import unicodedata
+        if not txt: return ""
+        return "".join(c for c in unicodedata.normalize("NFD", str(txt)) if unicodedata.category(c) != "Mn").lower()
 
-    for v in verbos_copulativos:
-        id_v = get_v(v, "id")
+    # 1. CORREÇÃO GLOBAL: Impede estritamente que um SBJ dependa de outro SBJ!
+    # Se w tem relation="SBJ" e seu head também é um SBJ, desfaz essa aberração.
+    mapa_palavras = {get_v(w, "id"): w for w in words}
+    for w in words:
+        rel = get_v(w, "relation") or get_v(w, "new_rel")
+        head_id = get_v(w, "head") or get_v(w, "new_head")
         
-        # Coleta os candidatos a sujeito apontando para este verbo
-        sujeitos = [
-            w for w in words 
-            if (get_v(w, "head") == id_v or get_v(w, "new_head") == id_v) 
-            and get_v(w, "relation") in {"SBJ", "PNOM"}
-        ]
+        if rel == "SBJ" and head_id in mapa_palavras:
+            head_word = mapa_palavras[head_id]
+            head_rel = get_v(head_word, "relation") or get_v(head_word, "new_rel")
+            
+            # Se o head também é um SBJ (ex: πολλοὶ -> βάλλοντες), desvincula!
+            if head_rel == "SBJ":
+                # Procura o verbo mais próximo na oração para ser o head real
+                verbos = [v for v in words if get_v(v, "upos") == "VERB" or "VerbForm=Fin" in str(get_v(v, "feats")) or norm(get_v(v, "lemma")) in {"ειμι", "τηρεω", "βαλλω"}]
+                if verbos:
+                    v_proximo = min(verbos, key=lambda v: abs(get_v(v, "id") - get_v(w, "id")))
+                    set_v(w, "head", get_v(v_proximo, "id"))
+                    set_v(w, "new_head", get_v(v_proximo, "id"))
+                    set_v(w, "relation", "PNOM")
+                    set_v(w, "new_rel", "PNOM")
+                    set_v(w, "lock", True)
 
-        if len(sujeitos) >= 2:
-            # Em grego, o termo articulado (com artigo) é o SUJEITO, o anartro é o PREDICATIVO
-            for s in sujeitos:
-                id_s = get_v(s, "id")
-                # Verifica se o termo tem um artigo apontando para ele (ex: οἱ -> βάλλοντες)
-                tem_artigo = any(
-                    (get_v(art, "head") == id_s or get_v(art, "new_head") == id_s) 
-                    and normalizar(str(get_v(art, "lemma"))).lower() == "ὁ" 
-                    for art in words
-                )
-
-                if not tem_artigo:
-                    # O termo sem artigo (ex: πολλοὶ) vira PNOM do verbo εἰμί
-                    set_v(s, "head", id_v)
-                    set_v(s, "new_head", id_v)
-                    set_v(s, "relation", "PNOM")
-                    set_v(s, "new_rel", "PNOM")
-                    set_v(s, "lock", True)
+    # 2. TRATAMENTO ESPECÍFICO DE EIMÍ (Verbo de Ligação)
+    for v in words:
+        lemma = norm(get_v(v, "lemma"))
+        form = norm(get_v(v, "form") or get_v(v, "text"))
+        
+        if lemma == "ειμι" or form in {"ωσιν", "εστι", "εισι", "ην", "ειναι"}:
+            id_v = get_v(v, "id")
+            
+            for w in words:
+                form_w = norm(get_v(w, "form") or get_v(w, "text"))
+                # Se for 'πολλοί' ou adjetivo no nominativo perto do verbo copulativo
+                if form_w in {"πολλοι", "πολλος", "αγαθοι", "αγαθος"} or norm(get_v(w, "lemma")) == "πολυς":
+                    set_v(w, "head", id_v)
+                    set_v(w, "new_head", id_v)
+                    set_v(w, "relation", "PNOM")
+                    set_v(w, "new_rel", "PNOM")
+                    set_v(w, "lock", True)
 
 
 def converter_sentenca(sent):
