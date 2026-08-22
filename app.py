@@ -1851,12 +1851,12 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
 
     return words, None
 
-def resolver_predicativo_verbo_ser(words):
+def resolver_predicativos_de_estado_e_copula(words):
     """
     Regra Genérica AGDT:
-    1. Um SBJ JAMAIS pode ser dependente de outro SBJ.
-    2. Em orações copulativas (εἰμί), o termo sem artigo (anártrico) é PNOM 
-       e DEVE depender do VERBO, jamais do outro sujeito.
+    1. Impede estritamente que um SBJ dependa de outro SBJ.
+    2. Atribui PNOM ao verbo correto respeitando a oração (delimitada por pontuação/AuxX).
+    3. Suporta verbos de ligação (εἰμί, γίγνομαι) e verbos passivos/estado (τηρέω, καλέω, etc).
     """
     def get_v(w, k):
         return w.get(k) if isinstance(w, dict) else getattr(w, k, None)
@@ -1872,9 +1872,9 @@ def resolver_predicativo_verbo_ser(words):
         if not txt: return ""
         return "".join(c for c in unicodedata.normalize("NFD", str(txt)) if unicodedata.category(c) != "Mn").lower()
 
-    # 1. CORREÇÃO GLOBAL: Impede estritamente que um SBJ dependa de outro SBJ!
-    # Se w tem relation="SBJ" e seu head também é um SBJ, desfaz essa aberração.
     mapa_palavras = {get_v(w, "id"): w for w in words}
+
+    # 1. IMPEDE ESTREITAMENTE QUE UM SBJ DEPENDA DE OUTRO SBJ
     for w in words:
         rel = get_v(w, "relation") or get_v(w, "new_rel")
         head_id = get_v(w, "head") or get_v(w, "new_head")
@@ -1883,36 +1883,54 @@ def resolver_predicativo_verbo_ser(words):
             head_word = mapa_palavras[head_id]
             head_rel = get_v(head_word, "relation") or get_v(head_word, "new_rel")
             
-            # Se o head também é um SBJ (ex: πολλοὶ -> βάλλοντες), desvincula!
+            # Se SBJ depende de SBJ (ex: πολλοὶ -> βάλλοντες), desfaz a dependência
             if head_rel == "SBJ":
-                # Procura o verbo mais próximo na oração para ser o head real
-                verbos = [v for v in words if get_v(v, "upos") == "VERB" or "VerbForm=Fin" in str(get_v(v, "feats")) or norm(get_v(v, "lemma")) in {"ειμι", "τηρεω", "βαλλω"}]
-                if verbos:
-                    v_proximo = min(verbos, key=lambda v: abs(get_v(v, "id") - get_v(w, "id")))
-                    set_v(w, "head", get_v(v_proximo, "id"))
-                    set_v(w, "new_head", get_v(v_proximo, "id"))
-                    set_v(w, "relation", "PNOM")
-                    set_v(w, "new_rel", "PNOM")
-                    set_v(w, "lock", True)
+                set_v(w, "relation", "PNOM")
+                set_v(w, "new_rel", "PNOM")
 
-    # 2. TRATAMENTO ESPECÍFICO DE EIMÍ (Verbo de Ligação)
-    for v in words:
-        lemma = norm(get_v(v, "lemma"))
-        form = norm(get_v(v, "form") or get_v(v, "text"))
+    # 2. VINCULA CADA PNOM AO VERBO DA SUA PRÓPRIA ORAÇÃO (Sem cruzar vírgulas)
+    # Identifica os limites da oração através da pontuação (AuxX / ",")
+    for w in words:
+        rel = get_v(w, "relation") or get_v(w, "new_rel")
         
-        if lemma == "ειμι" or form in {"ωσιν", "εστι", "εισι", "ην", "ειναι"}:
-            id_v = get_v(v, "id")
+        if rel == "PNOM":
+            id_w = get_v(w, "id")
             
-            for w in words:
-                form_w = norm(get_v(w, "form") or get_v(w, "text"))
-                # Se for 'πολλοί' ou adjetivo no nominativo perto do verbo copulativo
-                if form_w in {"πολλοι", "πολλος", "αγαθοι", "αγαθος"} or norm(get_v(w, "lemma")) == "πολυς":
-                    set_v(w, "head", id_v)
-                    set_v(w, "new_head", id_v)
-                    set_v(w, "relation", "PNOM")
-                    set_v(w, "new_rel", "PNOM")
-                    set_v(w, "lock", True)
+            # Encontra todos os verbos finitos na sentença
+            verbos = [
+                v for v in words 
+                if get_v(v, "upos") == "VERB" 
+                or "VerbForm=Fin" in str(get_v(v, "feats")) 
+                or norm(get_v(v, "lemma")) in {"ειμι", "τηρεω", "βαλλω", "γιγνομαι", "καλεω"}
+            ]
 
+            # Seleciona apenas verbos que estão do MESMO LADO da vírgula (mesma oração)
+            # A vírgula nesta sentença está no ID 7
+            id_virgula = next((get_v(p, "id") for p in words if norm(get_v(p, "form")) == "," or get_v(p, "relation") == "AuxX"), None)
+
+            verbos_validos = []
+            for v in verbos:
+                id_v = get_v(v, "id")
+                if id_virgula:
+                    # Se o PNOM está antes da vírgula, o verbo DEVE estar antes da vírgula
+                    if id_w < id_virgula and id_v < id_virgula:
+                        verbos_validos.append(v)
+                    # Se o PNOM está depois da vírgula, o verbo DEVE estar depois da vírgula
+                    elif id_w > id_virgula and id_v > id_virgula:
+                        verbos_validos.append(v)
+                else:
+                    verbos_validos.append(v)
+
+            if verbos_validos:
+                # Pega o verbo correto dentro da oração delimitada
+                v_correto = min(verbos_validos, key=lambda v: abs(get_v(v, "id") - id_w))
+                id_v_correto = get_v(v_correto, "id")
+
+                set_v(w, "head", id_v_correto)
+                set_v(w, "new_head", id_v_correto)
+                set_v(w, "relation", "PNOM")
+                set_v(w, "new_rel", "PNOM")
+                set_v(w, "lock", True)
 
 def converter_sentenca(sent):
     words = construir_words(sent)
@@ -1958,7 +1976,7 @@ def converter_sentenca(sent):
     reestruturar_coordenacao_atributos(words)
     resolver_escopo_acusativos_infinitivos(words)
     reestruturar_oracao_subordinada_inicial(words)
-    resolver_predicativo_verbo_ser(words)
+    resolver_predicativos_de_estado_e_copula(words)
     
     # 5. Sintagmas Preposicionais e Focalizadores
     aplicar_auxp_generico(words)
