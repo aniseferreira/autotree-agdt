@@ -1530,6 +1530,11 @@ def resolver_escopo_acusativos_infinitivos(words):
     associa objetos não anexados (como pronomes indefinidos 'τινα') ao infinitivo 
     mais próximo no fluxo linear da frase, respeitando os limites dos verbos.
     """
+    for w in words:
+        # PULA QUALQUER TOKEN QUE JÁ FOI TRAVADO POR OUTRA REGRA!
+        if w.get("lock") is True:
+            continue
+            
     infinitivos = [w for w in words if "VerbForm=Inf" in w.get("feats", "") or normalizar(w.get("lemma", "")) in {"βάλλω", "εἶπον", "ἀκούω"}]
     
     if len(infinitivos) < 2:
@@ -1759,7 +1764,7 @@ def converter_sentenca(sent):
     aplicar_regra_verbos_factitivos(words)
     garantir_predicado_raiz(words)
     aplicar_regras_infinitivo(words)
-    resolver_escopo_acusativos_infinitivos(words) # <-- INSERIR AQUI
+
     aplicar_estrutura_aci_e_disjuncao(words)
     aplicar_participios_substantivados(words)
     aplicar_ocomp_participio(words)
