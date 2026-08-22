@@ -1565,39 +1565,55 @@ def resolver_artigo_participio_e_infinitivo(words):
         "τοῦ", "τῆς", "τῷ", "τῇ", "οἱ", "αἱ", "τά", "τὰ", "τούς", "τοὺς"
     }
 
-    # Busca o infinitivo por morfologia (feats) OU por terminação verbal grega
+    # Auxiliar para ler atributos de Dicionário OU Objeto Stanza
+    def get_val(item, key):
+        if isinstance(item, dict):
+            return item.get(key)
+        return getattr(item, key, None)
+
+    # Auxiliar para escrever atributos em Dicionário OU Objeto Stanza
+    def set_val(item, key, value):
+        if isinstance(item, dict):
+            item[key] = value
+        else:
+            setattr(item, key, value)
+
+    # 1. Localiza infinitivos por morfologia ou terminação
     infinitivos = []
     for w in words:
-        texto = (w.get("form") or w.get("text") or w.get("word") or "").lower()
-        feats = w.get("feats") or ""
-        if "VerbForm=Inf" in feats or any(texto.endswith(suf) for suf in ["ειν", "εναι", "αι", "σθαι", "εῑν"]):
+        form_w = str(get_val(w, "form") or get_val(w, "text") or "").lower()
+        feats_w = str(get_val(w, "feats") or "")
+        if "VerbForm=Inf" in feats_w or any(form_w.endswith(suf) for suf in ["ειν", "εναι", "αι", "σθαι", "εῑν"]):
             infinitivos.append(w)
 
+    # 2. Associa artigo ao particípio e o particípio ao infinitivo
     for i, w in enumerate(words):
-        texto_w = (w.get("form") or w.get("text") or w.get("word") or "").lower()
-        form_norm = normalizar(texto_w)
+        form_w = str(get_val(w, "form") or get_val(w, "text") or "").lower()
+        form_norm = normalizar(form_w)
 
         if form_norm in {normalizar(a) for a in artigos_formas}:
             idx_next = i + 1
             if idx_next < len(words):
                 w_next = words[idx_next]
+                next_id = get_val(w_next, "id")
 
-                # 1. Artigo vira ATR da palavra seguinte (preenche todas as chaves)
-                w["head"] = w_next["id"]
-                w["new_head"] = w_next["id"]
-                w["relation"] = "ATR"
-                w["new_rel"] = "ATR"
-                w["lock"] = True
+                # Artigo vira ATR do próximo token
+                set_val(w, "head", next_id)
+                set_val(w, "new_head", next_id)
+                set_val(w, "relation", "ATR")
+                set_val(w, "new_rel", "ATR")
+                set_val(w, "lock", True)
 
-                # 2. Palavra seguinte vira SBJ do infinitivo (preenche todas as chaves)
+                # Particípio vira SBJ do infinitivo
                 if infinitivos:
                     inf_regente = infinitivos[0]
-                    if w_next["id"] != inf_regente["id"]:
-                        w_next["head"] = inf_regente["id"]
-                        w_next["new_head"] = inf_regente["id"]
-                        w_next["relation"] = "SBJ"
-                        w_next["new_rel"] = "SBJ"
-                        w_next["lock"] = True
+                    inf_id = get_val(inf_regente, "id")
+                    if next_id != inf_id:
+                        set_val(w_next, "head", inf_id)
+                        set_val(w_next, "new_head", inf_id)
+                        set_val(w_next, "relation", "SBJ")
+                        set_val(w_next, "new_rel", "SBJ")
+                        set_val(w_next, "lock", True)
                         
 def reestruturar_coordenacao_atributos(words):
     """
