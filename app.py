@@ -2169,9 +2169,21 @@ def converter_sentenca(sent):
         print("⚠️ ALERTA: OPENROUTER_API_KEY não foi encontrada nos st.secrets!")
 
     # 2. SANITIZAÇÃO E FILTRO DE SEGURANÇA (PÓS-LLM / REGRAS LOCAIS)
+
     for no in words:
-        feats = no.get("feats", {}) or {}
-        caso = str(feats.get("Case", "")).lower()
+        feats_raw = no.get("feats")
+        caso = "n/a"
+        
+        # Leitura segura de 'Case' para qualquer tipo de dado
+        if isinstance(feats_raw, dict):
+            caso = str(feats_raw.get("Case", "")).lower()
+        elif isinstance(feats_raw, str):
+            for item in feats_raw.split("|"):
+                if item.startswith("Case="):
+                    caso = item.split("=")[1].lower()
+        else:
+            caso = str(no.get("caso", "")).lower()
+
         rel = no.get("new_rel") or no.get("relation")
 
         # Impede que Dativo ou Acusativo sejam marcados como Sujeito (SBJ)
@@ -2185,7 +2197,7 @@ def converter_sentenca(sent):
             if rel in ["PRED", "PRED_CO"]:
                 no["new_rel"] = "ATR"
                 no["relation"] = "ATR"
-
+                
     # 3. Mapeamento final (Passo 8)
     for w in words:
         if w.get("lock"):
