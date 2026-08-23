@@ -1738,14 +1738,17 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://streamlit.io", # Recomendado pelo OpenRouter
+        "X-Title": "AGDT Ancient Greek Annotator"
     }
 
+    # Slugs oficiais e ativos no OpenRouter
     CASCATA_MODELOS = [
-        "anthropic/claude-3.5-haiku",     # Slug oficial atualizado do Claude 3.5 Haiku
-        "anthropic/claude-3-haiku",       # Slug oficial do Claude 3 Haiku
-        "google/gemini-2.0-flash-01",     # Slug oficial do Gemini Flash 2.0
-        "openai/gpt-4o-mini"              # Slug oficial do GPT-4o Mini
+        "anthropic/claude-3.5-haiku",
+        "anthropic/claude-3-haiku",
+        "google/gemini-2.0-flash-01",
+        "openai/gpt-4o-mini"
     ]
 
     if not isinstance(text_sent, str):
@@ -1754,7 +1757,7 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     tokens_payload = [
         {
             "id": w["id"], 
-            "form": w["text"], 
+            "form": w.get("text", w.get("form", "")), 
             "lemma": w.get("lemma",""), 
             "head": w.get("new_head", w.get("head")), 
             "rel": w.get("new_rel", w.get("relation"))
@@ -1789,7 +1792,6 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
         }
 
         try:
-            # Aumentamos o timeout para 15s pois a Anthropic às vezes leva 5-8s no primeiro boot
             response = requests.post(url, headers=headers, json=payload, timeout=15)
             
             if response.status_code == 200:
@@ -1803,7 +1805,6 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
                 print(f"✅ SUCESSO: Refinado com o modelo -> {modelo}")
                 return words, modelo
             else:
-                # PRINT ÚNICO E LIMPO NO LOG CASO O MODELO FALHE
                 print(f"⚠️ MODELO {modelo} FALHOU (Status {response.status_code}): {response.text[:150]}")
 
         except Exception as e:
