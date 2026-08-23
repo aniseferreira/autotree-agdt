@@ -2125,7 +2125,18 @@ def converter_sentenca(sent):
             print(f"ID: {w_id} | Form: {form_text} | Head: {head_val} | NewHead: {new_head_val} | Rel: {rel_val} | NewRel: {new_rel_val} | Lock: {lock_val}")
 
 # 2. Chama a API do OpenRouter
+
     api_key = st.secrets.get("OPENROUTER_API_KEY", "")
+    
+    if not api_key:
+        print("⚠️ ALERTA: OPENROUTER_API_KEY não foi encontrada nos st.secrets!")
+    else:
+        texto_frase = getattr(sent, 'text', '')
+        words, modelo_usado = refinar_arvore_com_openrouter_cascata(words, texto_frase, api_key)
+        
+        if modelo_usado is None:
+            print("⚠️ ALERTA: A chamada do OpenRouter falhou para todos os modelos da cascata! Verifique os logs de erro HTTP acima.")
+    
     if api_key:
         texto_frase = getattr(sent, 'text', '')
         words, modelo_usado = refinar_arvore_com_openrouter_cascata(words, texto_frase, api_key)
