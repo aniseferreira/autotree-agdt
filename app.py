@@ -2140,20 +2140,36 @@ def converter_sentenca(sent):
 
 # 2. Chama a API do OpenRouter
 
+    # 1. TENTATIVA DE REFINAMENTO VIA LLM
     api_key = st.secrets.get("OPENROUTER_API_KEY", "")
-    
-    if not api_key:
-        print("⚠️ ALERTA: OPENROUTER_API_KEY não foi encontrada nos st.secrets!")
-    else:
+    modelo_usado = None
+
+    if api_key:
         texto_frase = getattr(sent, 'text', '')
         words, modelo_usado = refinar_arvore_com_openrouter_cascata(words, texto_frase, api_key)
         
         if modelo_usado is None:
             print("⚠️ ALERTA: A chamada do OpenRouter falhou para todos os modelos da cascata! Verifique os logs de erro HTTP acima.")
-    
-    if api_key:
-        texto_frase = getattr(sent, 'text', '')
-        words, modelo_usado = refinar_arvore_com_openrouter_cascata(words, texto_frase, api_key)
+    else:
+        print("⚠️ ALERTA: OPENROUTER_API_KEY não foi encontrada nos st.secrets!")
+
+    # 2. SANITIZAÇÃO E FILTRO DE SEGURANÇA (PÓS-LLM / REGRAS LOCAIS)
+    for no in words:
+        feats = no.get("feats", {}) or {}
+        caso = str(feats.get("Case", "")).lower()
+        rel = no.get("new_rel") or no.get("relation")
+
+        # Impede que Dativo ou Acusativo sejam marcados como Sujeito (SBJ)
+        if caso in ["dat", "dative", "acc", "accusative"] and rel == "SBJ":
+            no["new_rel"] = "OBJ"
+            no["relation"] = "OBJ"
+
+        # Trava adicional: Impede PRED/PRED_CO em particípios
+        pos_val = str(no.get("postag", "")).lower()
+        if no.get("is_participio") or "v-p" in pos_val:
+            if rel in ["PRED", "PRED_CO"]:
+                no["new_rel"] = "ATR"
+                no["relation"] = "ATR"
 
     # 3. Mapeamento final (Passo 8)
     for w in words:
