@@ -2012,6 +2012,62 @@ def travar_preposicoes_como_auxp(words):
             set_v(w, "new_rel", "AuxP")
             set_v(w, "lock", True)
 
+def limpar_pred_em_infinitivos_e_participios_pos_llm(words):
+    """
+    REGRA DE PÓS-PROCESSAMENTO (Roda APÓS a LLM):
+    Garante que nenhum infinitivo ou particípio saia do pipeline com PRED ou PRED_CO,
+    mesmo que a LLM tenha ignorado as travas.
+    """
+    def get_v(w, k):
+        return w.get(k) if isinstance(w, dict) else getattr(w, k, None)
+
+    def set_v(w, k, val):
+        if isinstance(w, dict):
+            w[k] = val
+        else:
+            setattr(w, k, val)
+
+    def norm(txt):
+        import unicodedata
+        if not txt: return ""
+        return "".join(c for c in unicodedata.normalize("NFD", str(txt)) if unicodedata.category(c) != "Mn").lower()
+
+    # 1. Localiza o verbo principal finito real
+    v_pred = next((
+        w for w in words 
+        if get_v(w, "relation") == "PRED" 
+        and not any(suf in norm(get_v(w, "form") or get_v(w, "text")) for suf in ["η̄ναι", "ηναι", "εσθαι", "ειν", "ναι"])
+    ), None)
+    
+    id_pred = get_v(v_pred, "id") if v_pred else 0
+
+    # 2. Correção forçada de infinitivos/particípios mascarados de PRED/PRED_CO
+    for w in words:
+        rel = str(get_v(w, "relation") or get_v(w, "new_rel"))
+        form = norm(get_v(w, "form") or get_v(w, "text"))
+        
+        # Identifica se é infinitivo por terminação
+        eh_infinitivo = any(form.endswith(suf) for suf in ["η̄ναι", "ηναι", "εσθαι", "ειν", "αι", "ναι"])
+        
+        if eh_infinitivo and "PRED" in rel:
+            # Se for o primeiro infinitivo da oração declarativa, vira OBJ do verbo principal
+            if rel == "PRED" or rel == "PRED_CO":
+                # Verifica se há coordenador (ex: καί / ἤ) apontando para ele ou perto dele
+                tem_coord = any(get_v(c, "relation") == "COORD" or get_v(c, "new_rel") == "COORD" for c in words)
+                
+                if tem_coord and get_v(w, "id") > id_pred:
+                    # Segundo infinitivo coordenado -> OBJ_CO
+                    set_v(w, "relation", "OBJ_CO")
+                    set_v(w, "new_rel", "OBJ_CO")
+                else:
+                    # Primeiro infinitivo -> OBJ
+                    set_v(w, "relation", "OBJ")
+                    set_v(w, "new_rel", "OBJ")
+                    if id_pred > 0:
+                        set_v(w, "head", id_pred)
+                        set_v(w, "new_head", id_pred)
+
+
 def converter_sentenca(sent):
     words = construir_words(sent)
     
@@ -2121,7 +2177,9 @@ def converter_sentenca(sent):
             w["new_head"] = 0
 
     return {"text": sent.text, "words": words, "modelo_usado": modelo_usado}
-
+    
+# 3. PÓS-PROCESSAMENTO OBRIGATÓRIO (Garante a Regra de Ouro da AGDT)
+    limpar_pred_em_infinitivos_e_participios_pos_llm(words)  # <-- COLOCAR AQUI!
 
 def gerar_agdt_xml(sentences):
     root = ET.Element("treebank")
