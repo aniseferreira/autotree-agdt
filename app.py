@@ -1768,11 +1768,14 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
         "Analise a sentença: " + str(text_sent) + "\n\n"
         "Abaixo está a lista de tokens com id, form, lemma, head e relation atuais:\n"
         + str_payload + "\n\n"
-        "REGRAS DE CONSERVAÇÃO ESTRUTURAL:\n"
-        "1. RESPEITE A HIERARQUIA: Nunca altere o sujeito (SBJ) do verbo principal para fazê-lo depender de um infinitivo subordinado.\n"
-        "2. ETIQUETAS PERMITIDAS: SBJ, OBJ, OCOMP, PRED, PRED_CO, COORD, ADV, AuxP, AuxC, AuxX, ATR, PNOM.\n"
-        "3. PROIBIDO usar a etiqueta inexistente 'PCOMP'. Para predicativo do objeto, use estritamente 'OCOMP'.\n"
-        "4. Em orações com múltiplos infinitivos, cada infinitivo deve governar apenas os seus próprios argumentos diretos conforme a ordem linear e o escopo da oração.\n\n"
+        "REGRAS SINTÁTICAS ESTRITAS (PADRÃO AGDT/ARETHUSA):\n"
+        "1. PARTICÍPIOS E INFINITIVOS: NUNCA use 'PRED' ou 'PRED_CO' para particípios (ex: οὖσι) ou infinitivos. Particípios articulados atuam como 'ATR' ou 'SBJ/OBJ'.\n"
+        "2. PARTÍCULA ἌΝ: A partícula modal 'ἂν' DEVE ser rotulada estritamente como 'AuxY'. O seu head DEVE ser o verbo finito (Optativo, Subjuntivo ou Indicativo) da oração em que se encontra (seja oração principal, completiva ou subordinada). NUNCA rotule 'ἂν' como ADV, e NUNCA pendure 'ἂν' em particípios, infinitivos, substantivos ou conjunções.\n"
+        "3. ARTIGOS: O head de um artigo ('ATR') DEVE ser o substantivo, adjetivo ou particípio que ele articula. NUNCA faça um artigo depender de uma conjunção ou 'COORD'.\n"
+        "4. PREPOSIÇÕES: Preposições ('AuxP') governam o substantivo/termo regido imediato, e o conjunto atua como ADV ou ATR no verbo/termo regente.\n"
+        "5. PREDIÇÃO DE ELIPSE: Se houver coordenação de adjetivos/substantivos sem segundo verbo explícito (ex: μὲν... δέ...), coordene os termos diretamente na conjunção 'COORD' (com rótulos PNOM_CO / ADV_CO) ou ligue-os à conjunção regente.\n"
+        "6. ETIQUETAS PERMITIDAS: SBJ, OBJ, OCOMP, PRED, PRED_CO, COORD, ADV, ADV_CO, AuxP, AuxC, AuxX, AuxY, ATR, PNOM, PNOM_CO, AuxK.\n"
+        "7. PROIBIDO usar 'PCOMP' (use OCOMP para predicativo do objeto).\n\n"
         "Retorne APENAS um array JSON válido no formato:\n"
         '[ {"id": 1, "head": 7, "rel": "SBJ"}, ... ]'
     )
@@ -2024,6 +2027,16 @@ def limpar_pred_em_infinitivos_e_participios_pos_llm(words):
                         set_v(w, "head", id_pred)
                         set_v(w, "new_head", id_pred)
 
+import re
+
+def dividir_em_sentencas(texto: str) -> list[str]:
+    """Divide o texto grego em sentenças usando a pontuação de encerramento."""
+    # Pontos de encerramento em grego: . ; ·
+    padrao = r'([^.;·]+[.;·]?)'
+    blocos = re.findall(padrao, texto)
+    sentencas = [s.strip() for s in blocos if s.strip()]
+    return sentencas if sentencas else [texto]
+
 
 def converter_sentenca(sent):
     words = construir_words(sent)
@@ -2254,20 +2267,31 @@ else:
 
 if st.button("Processar Sentença", type="primary"):
     with st.spinner("Analisando gramática e executando refinamento..."):
-        # 1. Processa a frase no Stanza e executa o pipeline de conversão
+        # 1. Processa o texto completo no Stanza para extrair TODAS as sentenças
         doc = nlp(entrada_texto)
-        resultado = converter_sentenca(doc.sentences[0])
         
-        # 2. GERA AS VARIÁVEIS xml_str E conllu_str (Corrige o NameError na linha 1752)
-        xml_str = gerar_agdt_xml([resultado])
-        conllu_str = gerar_conllu([resultado])
+        resultados = []
+        modelos_usados = set()
 
-        st.success("Análise concluída!")
+        # Iteração sobre cada sentença encontrada pelo Stanza
+        for sent in doc.sentences:
+            resultado_sent = converter_sentenca(sent)
+            resultados.append(resultado_sent)
+            
+            # Coleta o modelo utilizado na sentença
+            mod = resultado_sent.get("modelo_usado")
+            if mod:
+                modelos_usados.add(mod)
+
+        # 2. Gera os arquivos finais agrupando todas as sentenças processadas
+        xml_str = gerar_agdt_xml(resultados)
+        conllu_str = gerar_conllu(resultados)
+
+        st.success(f"Análise concluída! ({len(resultados)} sentença(s) processada(s))")
         
-        # 3. Legenda com o modelo utilizado
-        modelo = resultado.get("modelo_usado")
-        if modelo:
-            st.caption(f"🤖 **Refinamento semântico executado por:** `{modelo}`")
+        # 3. Legenda com os modelos utilizados
+        if modelos_usados:
+            st.caption(f"🤖 **Refinamento semântico executado por:** `{', '.join(modelos_usados)}`")
         else:
             st.caption("⚡ **Processado exclusivamente pelas regras locais (sem LLM).**")
 
