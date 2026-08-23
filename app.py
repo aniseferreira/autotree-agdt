@@ -1742,10 +1742,10 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     }
 
     CASCATA_MODELOS = [
-        "anthropic/claude-3.5-haiku-20241022",  # ID exato do Claude 3.5 Haiku
-        "anthropic/claude-3-haiku-20240307",    # ID exato do Claude 3 Haiku
-        "google/gemini-2.0-flash-001",          # ID exato do Gemini Flash
-        "openai/gpt-4o-mini"
+        "anthropic/claude-3.5-haiku",     # Slug oficial atualizado do Claude 3.5 Haiku
+        "anthropic/claude-3-haiku",       # Slug oficial do Claude 3 Haiku
+        "google/gemini-2.0-flash-01",     # Slug oficial do Gemini Flash 2.0
+        "openai/gpt-4o-mini"              # Slug oficial do GPT-4o Mini
     ]
 
     if not isinstance(text_sent, str):
