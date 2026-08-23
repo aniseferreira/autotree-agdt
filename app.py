@@ -2029,13 +2029,11 @@ def limpar_pred_em_infinitivos_e_participios_pos_llm(words):
                         set_v(w, "head", id_pred)
                         set_v(w, "new_head", id_pred)
 
-import re
-
 def dividir_em_sentencas(texto: str) -> list[str]:
     """Divide o texto grego em sentenças usando a pontuação de encerramento."""
-    # Pontos de encerramento em grego: . ; ·
-    padrao = r'([^.;·]+[.;·]?)'
-    blocos = re.findall(padrao, texto)
+    texto_limpo = texto.replace('\n', ' ').strip()
+    # Divide nos caracteres ., · e ;
+    blocos = re.split(r'(?<=[.;·])\s+', texto_limpo)
     sentencas = [s.strip() for s in blocos if s.strip()]
     return sentencas if sentencas else [texto]
 
@@ -2280,27 +2278,31 @@ else:
 
 if st.button("Processar Sentença", type="primary"):
     with st.spinner("Analisando gramática e executando refinamento..."):
-        # 1. Processa o texto completo no Stanza para extrair TODAS as sentenças
-        doc = nlp(entrada_texto)
+        
+        # 1. Fatia o texto bruto em sentenças individuais usando a sua função
+        frases_isoladas = dividir_em_sentencas(entrada_texto)
         
         resultados = []
         modelos_usados = set()
 
-        # Iteração sobre cada sentença encontrada pelo Stanza
-        for sent in doc.sentences:
-            resultado_sent = converter_sentenca(sent)
+        # 2. Roda o Stanza e o pipeline frase por frase
+        for frase_str in frases_isoladas:
+            doc = nlp(frase_str)
+            # Processa a frase isolada
+            resultado_sent = converter_sentenca(doc.sentences[0])
             resultados.append(resultado_sent)
             
-            # Coleta o modelo utilizado na sentença
             mod = resultado_sent.get("modelo_usado")
             if mod:
                 modelos_usados.add(mod)
 
-        # 2. Gera os arquivos finais agrupando todas as sentenças processadas
+        # 3. Gera os arquivos agrupados
         xml_str = gerar_agdt_xml(resultados)
         conllu_str = gerar_conllu(resultados)
 
         st.success(f"Análise concluída! ({len(resultados)} sentença(s) processada(s))")
+        
+        # ... (restante do código das abas e botões de download)
         
         # 3. Legenda com os modelos utilizados
         if modelos_usados:
