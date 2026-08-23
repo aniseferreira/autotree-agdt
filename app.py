@@ -2141,6 +2141,22 @@ def converter_sentenca(sent):
     return {"text": sent.text, "words": words, "modelo_usado": modelo_usado}
 
 def gerar_agdt_xml(sentences):
+    # Mapeamento rápido de POS simples para a máscara de 9 posições do AGDT (reativa cores na UI)
+    POS_PARA_POSTAG = {
+        "VERB": "v--------",
+        "NOUN": "n--------",
+        "ADJ":  "a--------",
+        "ART":  "l--------",
+        "PREP": "r--------",
+        "PRON": "p--------",
+        "ADV":  "d--------",
+        "CONJ": "c--------",
+        "PART": "g--------",
+        "INTJ": "i--------",
+        "NUM":  "m--------",
+        "PUNCT": "--------",
+    }
+
     root = ET.Element("treebank")
 
     for sent_idx, sent_data in enumerate(sentences, 1):
@@ -2165,11 +2181,17 @@ def gerar_agdt_xml(sentences):
             head_str = str(int(raw_head)) if isinstance(raw_head, (int, float)) else str(raw_head)
             rel_str = str(raw_rel)
 
+            # Resolve a postag para exibição de cores
+            postag_val = w.get("postag")
+            if not postag_val:
+                pos_basica = str(w.get("pos") or w.get("upos") or "").upper()
+                postag_val = POS_PARA_POSTAG.get(pos_basica, "--------")
+
             ET.SubElement(doc_elem, "word", {
                 "id": str(w["id"]),
                 "form": str(w.get("text", "")),
                 "lemma": str(w.get("lemma", "")),
-                "postag": str(w.get("postag", "")),
+                "postag": str(postag_val),
                 "head": head_str,
                 "relation": rel_str
             })
