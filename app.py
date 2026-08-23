@@ -1775,11 +1775,6 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     # 2. Converte a lista para string JSON que será enviada no Prompt
     str_payload = json.dumps(tokens_payload, ensure_ascii=False)
     
-    prompt = (
-        "Você é um especialista em anotação sintática em Grego Antigo no padrão AGDT / Arethusa.\n"
-        "Analise a sentença: " + str(text_sent) + "\n\n"
-        "Abaixo está a lista de tokens com id, form, lemma, head e relation atuais:\n"
-        + str_payload + "\n\n"
         
         # 2. PROMPT COMPLETO UNIFICADO (COM AS REGRAS 1 A 4 DE CASO E SINTAXE)
     prompt = (
