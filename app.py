@@ -1757,10 +1757,30 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     # 1. Monta a lista de tokens incluindo as informações de morfologia
     tokens_payload = []
     for w in words:
-        feats = w.get("feats", {}) or {}
-        caso = feats.get("Case", "N/A")
-        num = feats.get("Number", "N/A")
-        gen = feats.get("Gender", "N/A")
+        feats_raw = w.get("feats")
+        
+        # 1. Se feats for um dicionário (padrão Stanza dict)
+        if isinstance(feats_raw, dict):
+            caso = feats_raw.get("Case", "N/A")
+            num = feats_raw.get("Number", "N/A")
+            gen = feats_raw.get("Gender", "N/A")
+        # 2. Se feats for uma string formatada (ex: "Case=Acc|Gender=Neut")
+        elif isinstance(feats_raw, str):
+            caso = "N/A"
+            num = "N/A"
+            gen = "N/A"
+            for item in feats_raw.split("|"):
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    if k == "Case": caso = v
+                    elif k == "Number": num = v
+                    elif k == "Gender": gen = v
+        # 3. Fallback se não houver feats
+        else:
+            caso = w.get("caso", "N/A")
+            num = w.get("numero", "N/A")
+            gen = w.get("genero", "N/A")
+
         pos = w.get("pos", w.get("upos", ""))
 
         tokens_payload.append({
