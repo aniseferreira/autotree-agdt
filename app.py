@@ -1524,96 +1524,37 @@ def reestruturar_periodo_composto_paralelo(words):
                 tinos["new_rel"] = "OBJ"
                 tinos["new_head"] = ypo["id"]
 
-def resolver_escopo_acusativos_infinitivos(words):
+def aplicar_regras_locais_limpas(tokens: list[dict]) -> list[dict]:
     """
-    Regra Genérica: Em construções com múltiplos infinitivos na mesma oração,
-    associa objetos não anexados (como pronomes indefinidos 'τινα') ao infinitivo 
-    mais próximo no fluxo linear da frase, respeitando os limites dos verbos.
+    Pré-processamento estritamente determinístico.
+    NÃO define heads para substantivos, infinitivos ou particípios.
     """
-    for w in words:
-        # PULA QUALQUER TOKEN QUE JÁ FOI TRAVADO POR OUTRA REGRA!
-        if w.get("lock") is True:
-            continue
-            
-    infinitivos = [w for w in words if "VerbForm=Inf" in w.get("feats", "") or normalizar(w.get("lemma", "")) in {"βάλλω", "εἶπον", "ἀκούω"}]
-    
-    if len(infinitivos) < 2:
-        return
-
-    # Procura pronomes/substantivos no acusativo que estejam órfãos ou mal atribuídos
-    for w in words:
-        if normalizar(w.get("lemma", "")) == "τις" or "Case=Acc" in w.get("feats", ""):
-            # Encontra o infinitivo mais próximo ANTERIOR ou IMEDIATAMENTE POSTERIOR
-            inf_proximo = min(infinitivos, key=lambda inf: abs(inf["id"] - w["id"]))
-            
-            # Se o acusativo pertence ao escopo do infinitivo mais próximo, revincula
-            if inf_proximo:
-                w["new_head"] = inf_proximo["id"]
-                w["head"] = inf_proximo["id"]
-                w["new_rel"] = "OBJ"
-                w["relation"] = "OBJ"
-                w["lock"] = True  # <-- ESTA LINHA IMPEDE QUE A LLM SOBERPONHA O ESCOPO DO ACUSATIVO!
-
-def resolver_artigo_participio_e_infinitivo(words):
-    """
-    Regra Genérica AGDT:
-    1. Força o artigo determinante a ser ATR da palavra seguinte.
-    2. Garante que o particípio/substantivo articulado seja SBJ do infinitivo.
-    """
-    artigos_formas = {
-        "ὁ", "ἡ", "τό", "τὸ", "τον", "τὸν", "τη̄ν", "τὴν", 
-        "τοῦ", "τῆς", "τῷ", "τῇ", "οἱ", "αἱ", "τά", "τὰ", "τούς", "τοὺς"
-    }
-
-    # Auxiliar para ler atributos de Dicionário OU Objeto Stanza
-    def get_val(item, key):
-        if isinstance(item, dict):
-            return item.get(key)
-        return getattr(item, key, None)
-
-    # Auxiliar para escrever atributos em Dicionário OU Objeto Stanza
-    def set_val(item, key, value):
-        if isinstance(item, dict):
-            item[key] = value
-        else:
-            setattr(item, key, value)
-
-    # 1. Localiza infinitivos por morfologia ou terminação
-    infinitivos = []
-    for w in words:
-        form_w = str(get_val(w, "form") or get_val(w, "text") or "").lower()
-        feats_w = str(get_val(w, "feats") or "")
-        if "VerbForm=Inf" in feats_w or any(form_w.endswith(suf) for suf in ["ειν", "εναι", "αι", "σθαι", "εῑν"]):
-            infinitivos.append(w)
-
-    # 2. Associa artigo ao particípio e o particípio ao infinitivo
-    for i, w in enumerate(words):
-        form_w = str(get_val(w, "form") or get_val(w, "text") or "").lower()
-        form_norm = normalizar(form_w)
-
-        if form_norm in {normalizar(a) for a in artigos_formas}:
-            idx_next = i + 1
-            if idx_next < len(words):
-                w_next = words[idx_next]
-                next_id = get_val(w_next, "id")
-
-                # Artigo vira ATR do próximo token
-                set_val(w, "head", next_id)
-                set_val(w, "new_head", next_id)
-                set_val(w, "relation", "ATR")
-                set_val(w, "new_rel", "ATR")
-                set_val(w, "lock", True)
-
-                # Particípio vira SBJ do infinitivo
-                if infinitivos:
-                    inf_regente = infinitivos[0]
-                    inf_id = get_val(inf_regente, "id")
-                    if next_id != inf_id:
-                        set_val(w_next, "head", inf_id)
-                        set_val(w_next, "new_head", inf_id)
-                        set_val(w_next, "relation", "SBJ")
-                        set_val(w_next, "new_rel", "SBJ")
-                        set_val(w_next, "lock", True)
+    n = len(tokens)
+    for i, tok in enumerate(tokens):
+        pos = tok.get("pos")
+        
+        # Correção do Artigo: Pula partículas pós-positivas (ex: δὲ) para achar o real modificado
+        if pos == "ART":
+            j = i + 1
+            while j < n and tokens[j].get("pos") in ["PART", "PUNCT"]:
+                j += 1
+            if j < n:
+                # O artigo aponta diretamente para o próximo termo real (seja substantivo ou particípio)
+                tok["head"] = tokens[j]["id"]
+                tok["rotulo"] = "ATR"
+                tok["lock"] = True
+                
+        # Correção de Preposição: Conecta rigidamente ao seu termo regido imediato
+        elif pos == "PREP":
+            j = i + 1
+            while j < n and tokens[j].get("pos") in ["PART", "PUNCT"]:
+                j += 1
+            if j < n:
+                tok["head"] = tokens[j]["id"]
+                tok["rotulo"] = "AuxP"
+                tok["lock"] = True
+                
+    return tokens
 
 def reestruturar_oracao_subordinada_inicial(words):
     """
@@ -1749,28 +1690,44 @@ def reestruturar_coordenacao_atributos(words):
                         w_adj2["new_rel"] = "ATR_CO"
                         w_adj2["lock"] = True
 
-def aplicar_refinamento_llm_com_trava_rigida(words_locais, corrections_llm):
-    """
-    Garantia Absoluta:
-    A LLM só pode alterar um nó se ele NÃO foi travado (w['lock'] = True) 
-    pelas regras locais do Python.
-    """
-    corr_map = {item["id"]: item for item in corrections_llm}
+def aplicar_refinamento_llm_com_trava_rigida(arvore_original: list[dict], arvore_llm: list[dict]) -> list[dict]:
+    arvore_final = copy.deepcopy(arvore_original)
+    
+    # Mapeia a resposta da LLM por ID para busca rápida
+    mapa_llm = {node["id"]: node for node in arvore_llm if isinstance(node, dict) and "id" in node}
 
-    for w in words_locais:
-        # Se o nó foi travado pelas regras locais, a LLM É IGNORADA NELE
-        if w.get("lock"):
+    for no in arvore_final:
+        node_id = no.get("id")
+        no_llm = mapa_llm.get(node_id)
+        
+        if not no_llm:
             continue
-            
-        # Se o nó estava livre e a LLM sugeriu correção, aplica
-        if w["id"] in corr_map:
-            sugestao = corr_map[w["id"]]
-            w["new_head"] = sugestao["head"]
-            w["head"] = sugestao["head"]
-            w["new_rel"] = sugestao["rel"]
-            w["relation"] = sugestao["rel"]
 
-    return words_locais
+        # Extract values returned by LLM (defaults to current values if missing)
+        llm_head = no_llm.get("head", no.get("head"))
+        llm_rel = no_llm.get("rel") or no_llm.get("relation", no.get("relation"))
+
+        # 1. Trava Determinística Local: Preserva nós travados pelo pré-processamento
+        if no.get("lock"):
+            continue
+
+        # 2. Regra de Ouro: Infinitivo NUNCA pode ser PRED, PRED_CO ou PCOMP
+        pos_val = str(no.get("postag", "")).upper()
+        is_inf = no.get("is_infinitivo") or "INF" in pos_val or no.get("upos") == "VERB" and "Inf" in str(no.get("feats", ""))
+        
+        if is_inf and llm_rel in ["PRED", "PRED_CO", "PCOMP"]:
+            caso = no.get("feats", {}).get("Case") if isinstance(no.get("feats"), dict) else no.get("caso")
+            llm_rel = "OBJ" if caso == "ACC" else "COMP"
+
+        # 3. Limpeza de alucinações de rótulo (Ex: PRED_CO sem coordenação)
+        if llm_rel == "PRED_CO" and not no.get("is_coordenado"):
+            llm_rel = "PRED"
+
+        # Aplica os novos valores sugeridos pela LLM e validados pelo Python
+        no["new_head"] = llm_head
+        no["new_rel"] = llm_rel
+
+    return arvore_final
 
 def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     """Refina a árvore via OpenRouter e retorna (words, modelo_utilizado)."""
@@ -2107,12 +2064,13 @@ def converter_sentenca(sent):
     aplicar_conectivos_correlativos(words)
 
     resolver_infinitivo_articulado(words)   # 1º: Resolve e TRAVA o sujeito (τὸ βάλλεσθαι)
-    resolver_artigo_participio_e_infinitivo(words)
+    
     resolver_kai_enfatico(words)             # 2º: Resolve e TRAVA o καὶ AuxZ
     reestruturar_coordenacao_atributos(words)
-    resolver_escopo_acusativos_infinitivos(words)
+    
     reestruturar_oracao_subordinada_inicial(words)
     resolver_predicativos_de_estado_e_copula(words)
+    
     # NOVÍSSIMA REGRA DE OURO DA AGDT:
     proibir_pred_em_formas_nao_finitas(words)  # <-- INSERIR AQUI!
     travar_preposicoes_como_auxp(words)  # <-- Usa sua constante existente!
@@ -2176,10 +2134,11 @@ def converter_sentenca(sent):
         if str(w.get("new_head")) == str(w.get("id")):
             w["new_head"] = 0
 
+    # 4. PÓS-PROCESSAMENTO OBRIGATÓRIO (Sanitização da Regra de Ouro após a LLM)
+    # MUST BE HERE (antes do return!)
+    limpar_pred_em_infinitivos_e_participios_pos_llm(words)
+
     return {"text": sent.text, "words": words, "modelo_usado": modelo_usado}
-    
-# 3. PÓS-PROCESSAMENTO OBRIGATÓRIO (Garante a Regra de Ouro da AGDT)
-    limpar_pred_em_infinitivos_e_participios_pos_llm(words)  # <-- COLOCAR AQUI!
 
 def gerar_agdt_xml(sentences):
     root = ET.Element("treebank")
