@@ -1754,17 +1754,25 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
     if not isinstance(text_sent, str):
         text_sent = " ".join([str(w.get("text", "")) for w in words])
 
-    tokens_payload = [
-        {
+    # 1. Monta a lista de tokens incluindo as informações de morfologia
+    tokens_payload = []
+    for w in words:
+        feats = w.get("feats", {}) or {}
+        caso = feats.get("Case", "N/A")
+        num = feats.get("Number", "N/A")
+        gen = feats.get("Gender", "N/A")
+        pos = w.get("pos", w.get("upos", ""))
+
+        tokens_payload.append({
             "id": w["id"], 
             "form": w.get("text", w.get("form", "")), 
-            "lemma": w.get("lemma",""), 
-            "head": w.get("new_head", w.get("head")), 
-            "rel": w.get("new_rel", w.get("relation"))
-        }
-        for w in words
-    ]
+            "lemma": w.get("lemma", ""),
+            "morfologia": f"POS={pos} | Caso={caso} | Gênero={gen} | Num={num}",
+            "head_atual": w.get("new_head", w.get("head")), 
+            "rel_atual": w.get("new_rel", w.get("relation"))
+        })
 
+    # 2. Converte a lista para string JSON que será enviada no Prompt
     str_payload = json.dumps(tokens_payload, ensure_ascii=False)
     
     prompt = (
@@ -1772,14 +1780,20 @@ def refinar_arvore_com_openrouter_cascata(words, text_sent, api_key):
         "Analise a sentença: " + str(text_sent) + "\n\n"
         "Abaixo está a lista de tokens com id, form, lemma, head e relation atuais:\n"
         + str_payload + "\n\n"
-        "REGRAS SINTÁTICAS ESTRITAS (PADRÃO AGDT/ARETHUSA):\n"
-        "1. PARTICÍPIOS E INFINITIVOS: NUNCA use 'PRED' ou 'PRED_CO' para particípios (ex: οὖσι) ou infinitivos. Particípios articulados atuam como 'ATR' ou 'SBJ/OBJ'.\n"
-        "2. PARTÍCULA ἌΝ: A partícula modal 'ἂν' DEVE ser rotulada estritamente como 'AuxY'. O seu head DEVE ser o verbo finito (Optativo, Subjuntivo ou Indicativo) da oração em que se encontra (seja oração principal, completiva ou subordinada). NUNCA rotule 'ἂν' como ADV, e NUNCA pendure 'ἂν' em particípios, infinitivos, substantivos ou conjunções.\n"
-        "3. ARTIGOS: O head de um artigo ('ATR') DEVE ser o substantivo, adjetivo ou particípio que ele articula. NUNCA faça um artigo depender de uma conjunção ou 'COORD'.\n"
-        "4. PREPOSIÇÕES: Preposições ('AuxP') governam o substantivo/termo regido imediato, e o conjunto atua como ADV ou ATR no verbo/termo regente.\n"
-        "5. PREDIÇÃO DE ELIPSE: Se houver coordenação de adjetivos/substantivos sem segundo verbo explícito (ex: μὲν... δέ...), coordene os termos diretamente na conjunção 'COORD' (com rótulos PNOM_CO / ADV_CO) ou ligue-os à conjunção regente.\n"
-        "6. ETIQUETAS PERMITIDAS: SBJ, OBJ, OCOMP, PRED, PRED_CO, COORD, ADV, ADV_CO, AuxP, AuxC, AuxX, AuxY, ATR, PNOM, PNOM_CO, AuxK.\n"
-        "7. PROIBIDO usar 'PCOMP' (use OCOMP para predicativo do objeto).\n\n"
+        
+        # 2. PROMPT COMPLETO UNIFICADO (COM AS REGRAS 1 A 4 DE CASO E SINTAXE)
+    prompt = (
+        "Você é um especialista em anotação sintática em Grego Antigo no padrão AGDT / Arethusa.\n"
+        "Analise a sentença: " + str(text_sent) + "\n\n"
+        "Abaixo está a lista de tokens com id, form, lemma, morfologia, head e relation atuais:\n"
+        + str_payload + "\n\n"
+        "REGRAS ESTRITAS DE CASO E SINTAXE (AGDT):\n"
+        "1. CONCORDÂNCIA DE ARTIGOS/ADJETIVOS: O artigo/adjetivo 'ATR' DEVE concordar em CASO, GÊNERO e NÚMERO com o substantivo regente. NUNCA faça um artigo depender de um substantivo de outro caso.\n"
+        "2. NOMINATIVO: Substantivos, adjetivos e particípios no NOMINATIVO devem ser 'SBJ' (Sujeito) ou 'PNOM' (Predicativo do Sujeito). NUNCA rotule um nominativo como OBJ ou ADV.\n"
+        "3. DATIVO / ACUSATIVO: Termos no DATIVO ou ACUSATIVO NUNCA podem ser 'SBJ' (Sujeito) de um verbo na forma finita. O dativo atua como 'OBJ' (Objeto Indireto) ou 'ADV' (Adjunto Adverbial).\n"
+        "4. PARTICÍPIOS: NUNCA use 'PRED' ou 'PRED_CO' em particípios (ex: οὖσα, οὖσιν) ou infinitivos. Particípios no Nominativo concordando com o sujeito implícito usam 'ADV' ou 'ATR'. Particípios no Dativo articulados usam 'OBJ' ou 'ADV', NUNCA 'SBJ'.\n"
+        "5. PARTÍCULA ἌΝ: A partícula modal 'ἂν' DEVE ser rotulada estritamente como 'AuxY'. O seu head DEVE ser o verbo finito da oração em que se encontra.\n"
+        "6. ETIQUETAS PERMITIDAS: SBJ, OBJ, OCOMP, PRED, PRED_CO, COORD, ADV, ADV_CO, AuxP, AuxC, AuxX, AuxY, ATR, PNOM, PNOM_CO, AuxK.\n\n"
         "Retorne APENAS um array JSON válido no formato:\n"
         '[ {"id": 1, "head": 7, "rel": "SBJ"}, ... ]'
     )
